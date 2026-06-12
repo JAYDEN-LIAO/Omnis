@@ -39,12 +39,15 @@ async def _stream_with_owner(
     session_id: Optional[str],
 ):
     """包一层 async generator，进入时设 contextvar，退出时复位。
-    _request 透传到 chat_with_agent_stream，便于工具拿到 owner_id + session_id。"""
+    _request 透传到 chat_with_agent_stream，便于工具拿到 owner_id + session_id。
+    v2.3：聊天消息由 _write_memory_async 在 stream 完成后自动持久化。"""
+    text_collector: list = []
     token = set_current_owner(owner_id)
     try:
         _request = {
             "owner_id": owner_id,
             "session_id": session_id,
+            "_text_collector": text_collector,
         }
         async for chunk in chat_with_agent_stream(
             messages, session_id=session_id, _request=_request
@@ -108,7 +111,7 @@ async def get_memory_stats(current_user: Dict = Depends(get_current_user)):
 async def get_session_memory(
     session_id: str, current_user: Dict = Depends(get_current_user)
 ):
-    """获取指定 session 的记忆详情（v2.2 P0#2：owner 隔离，越权读取返回空）"""
+    """获取指定 session 的记忆详情（owner 隔离，越权读取返回空）"""
     try:
         owner_id = str(current_user["id"])
         summary = memory_manager.store.get_summary(session_id, owner_id=owner_id)
@@ -130,11 +133,31 @@ async def get_session_memory(
         return {"success": False, "error": str(e)}
 
 
+@router.get("/api/agent/memory/{session_id}/messages")
+async def get_session_messages(
+    session_id: str, current_user: Dict = Depends(get_current_user)
+):
+    """获取指定 session 的聊天消息列表（owner 隔离，仅返回属于自己的消息）"""
+    try:
+        owner_id = str(current_user["id"])
+        msgs = memory_manager.store.get_messages(session_id, owner_id)
+        return {
+            "success": True,
+            "data": {
+                "messages": msgs,
+                "total": len(msgs),
+            },
+        }
+    except Exception as e:
+        logger.error(f"[session_messages] {e}")
+        return {"success": False, "error": str(e)}
+
+
 @router.delete("/api/agent/memory/{session_id}")
 async def clear_session_memory(
     session_id: str, current_user: Dict = Depends(get_current_user)
 ):
-    """清除指定 session 的所有记忆（v2.2 P0#2：owner 隔离，仅删自己的 session）"""
+    """清除指定 session 的所有记忆（owner 隔离，仅删自己的 session）"""
     try:
         owner_id = str(current_user["id"])
         deleted = memory_manager.delete_session(session_id, owner_id=owner_id)

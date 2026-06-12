@@ -17,7 +17,7 @@ from ._owner import with_owner
 
 logger = get_logger("agent.tools.scan")
 
-# M9 v2.2: 用 ThreadPoolExecutor 替代裸 daemon=True 线程，便于追踪/限流/优雅关闭
+# 用 ThreadPoolExecutor 替代裸 daemon=True 线程，便于追踪/限流/优雅关闭
 _scan_executor: ThreadPoolExecutor = ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="agent-scan"
 )
@@ -91,7 +91,7 @@ def trigger_scan_tool(
     try:
         asyncio.create_task(_run())
     except RuntimeError:
-        # M9 v2.2: 用共享 ThreadPoolExecutor 兜底，避免无界 daemon 线程
+        # 用共享 ThreadPoolExecutor 兜底，避免无界 daemon 线程
         _scan_executor.submit(job, None, _owner_id)
 
     return ToolResult(

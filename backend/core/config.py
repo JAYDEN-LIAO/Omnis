@@ -45,7 +45,7 @@ class Settings:
     REVIEWER_BASE_URL = os.getenv("REVIEWER_BASE_URL", "").strip()
     REVIEWER_MODEL = os.getenv("REVIEWER_MODEL", "").strip()
 
-    # ======== 配置 (v2 修复 #2.1): Agent 智能体（分析/对话助手） ========
+    # ======== Agent 智能体（分析/对话助手） ========
     AGENT_API_KEY = os.getenv("AGENT_API_KEY", "").strip()
     AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "").strip()
     AGENT_MODEL = os.getenv("AGENT_MODEL", "").strip()
@@ -93,7 +93,7 @@ class Settings:
     # ======== API 认证配置 ========
     API_KEYS = os.getenv("API_KEYS", "")
 
-    # ======== WS4: JWT 认证配置 ========
+    # ======== JWT 认证配置 ========
     _raw_jwt_secret = os.getenv("JWT_SECRET", "")
     JWT_SECRET = _raw_jwt_secret.strip() if _raw_jwt_secret else ""
     JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256").strip()
@@ -101,7 +101,7 @@ class Settings:
     # v2.2 P1#14：refresh token 有效期（默认 7 天）。仅用于换 access token，不直接鉴权 API。
     JWT_REFRESH_EXPIRE_HOURS = int(os.getenv("JWT_REFRESH_EXPIRE_HOURS", "168"))
 
-    # ======== WS4: OAuth 配置（v2 上线时填真实值）=======
+    # ======== OAuth 配置（v2 上线时填真实值）=======
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
     WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "").strip()
@@ -211,7 +211,7 @@ def get_effective_llm_config(agent: str) -> dict:
         "reviewer":  "REVIEWER",
         "embedding": "EMBEDDING",
         "vision":    "VISION",
-        "agent":     "AGENT",   # v2 修复 #2.1
+        "agent":     "AGENT",
     }
     prefix = prefix_map.get(agent)
     if not prefix:
@@ -230,7 +230,7 @@ def get_effective_llm_config(agent: str) -> dict:
 
 def get_agent_config() -> tuple[str, str, str]:
     """
-    Agent 智能体配置回退链（修复 #2.1）：
+    Agent 智能体配置回退链：
         AGENT_* → ANALYST_* → DEFAULT_*
     返回 (api_key, base_url, model)
     """

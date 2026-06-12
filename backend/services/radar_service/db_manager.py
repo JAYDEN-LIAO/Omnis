@@ -642,8 +642,8 @@ def get_topic_summary_list(
         params = []
 
         if keyword:
-            query += " AND keyword = ?"
-            params.append(keyword)
+            query += " AND keyword LIKE ?"
+            params.append(f"%{keyword}%")
 
         if sentiment:
             query += " AND risk_class = ?"

@@ -87,6 +87,8 @@ async def web_search_tool(
                 scanned = partial["scanned"]
                 by_platform[plat] = scanned
                 yield {"type": "progress", "platform": plat, "scanned": scanned}
+            elif partial["type"] == "heartbeat":
+                yield partial  # 透传心跳，保持 SSE 活跃
             elif partial["type"] == "item":
                 post = partial["item"]
                 try:

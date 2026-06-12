@@ -1,14 +1,8 @@
 """
 G 组（系统状态）。
 
-P1.2 阶段：先把旧 tools.py 里的 2 个工具（get_system_status /
-get_recent_alerts）原样迁过来，验证 @tool 装饰器骨架可用。
-
-P1.4 阶段：trigger_background_crawl 已废弃并移除，扫描入口统一由
+trigger_background_crawl 已废弃并移除，扫描入口统一由
 scan.trigger_scan（带 mode + owner 隔离）提供。
-
-P1.8 阶段：追加 get_system_overview / get_recent_activity / health_check
-三个 per-user 视角的 G 组工具。
 """
 from __future__ import annotations
 
@@ -114,8 +108,7 @@ def get_recent_alerts(limit: int = 5, _owner_id: str = "") -> str:
 
 
 # ===============================================================
-# P1.8 — G 组（per-user 系统状态）
-# G 组：per-user 系统状态
+# G 组（per-user 系统状态）
 # ===============================================================
 
 

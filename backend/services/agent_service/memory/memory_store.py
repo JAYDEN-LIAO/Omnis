@@ -151,7 +151,7 @@ class AgentMemoryStore:
         sensitivity: str = "balanced"
     ) -> int:
         """写入或更新实体记忆（query_count++）
-        v2.2 P0#2: owner_id 必传，限定写入属于该 owner 的 session
+        owner_id 必传，限定写入属于该 owner 的 session
         """
         now = datetime.now().isoformat()
         with self._get_conn() as conn:
@@ -187,7 +187,7 @@ class AgentMemoryStore:
         min_count: int = 2,
         include_legacy: bool = True
     ) -> List[Dict]:
-        """获取高频实体（v2.2 P0#2：owner 隔离 + legacy 兼容）
+        """获取高频实体（owner 隔离 + legacy 兼容）
 
         - owner_id 必传，限定到该 owner 的 session
         - include_legacy=True 时，额外返回 owner_id='' 的存量数据（无主数据共享）
@@ -248,7 +248,7 @@ class AgentMemoryStore:
         confidence: float = 0.8,
         ttl_days: int = 90
     ) -> int:
-        """写入事实记忆（v2.2 P0#2：owner 必传）"""
+        """写入事实记忆（owner 必传）"""
         now = datetime.now().isoformat()
         expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
         with self._get_conn() as conn:
@@ -267,7 +267,7 @@ class AgentMemoryStore:
         owner_id: str,
         include_legacy: bool = True
     ) -> List[Dict]:
-        """获取未过期事实记忆（v2.2 P0#2：owner 隔离 + legacy 兼容）"""
+        """获取未过期事实记忆（owner 隔离 + legacy 兼容）"""
         now = datetime.now().isoformat()
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
@@ -297,7 +297,7 @@ class AgentMemoryStore:
         pattern_value: str,
         owner_id: str = ""
     ):
-        """写入或更新行为模式（v2.2 P0#2：owner 必传）"""
+        """写入或更新行为模式（owner 必传）"""
         now = datetime.now().isoformat()
         with self._get_conn() as conn:
             cursor = conn.cursor()
@@ -322,7 +322,7 @@ class AgentMemoryStore:
         days: int = 7,
         include_legacy: bool = True
     ) -> List[Dict]:
-        """获取最近 N 天内的行为模式（v2.2 P0#2：owner 隔离 + legacy 兼容）"""
+        """获取最近 N 天内的行为模式（owner 隔离 + legacy 兼容）"""
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
@@ -385,7 +385,7 @@ class AgentMemoryStore:
         owner_id: str = "",
         include_legacy: bool = True
     ) -> Optional[Dict]:
-        """获取对话摘要（v2.2 P0#2：owner 隔离 + legacy 兼容）
+        """获取对话摘要（owner 隔离 + legacy 兼容）
 
         返回属于该 owner（或 legacy 无主数据）的 summary，避免越权读取他人 session。
         """
@@ -454,7 +454,7 @@ class AgentMemoryStore:
     # ==================== 清理 ====================
 
     def cleanup_expired_facts(self) -> int:
-        """删除 fact_memory 中 expires_at < now 的行（修复 #4.3 TTL 清理）"""
+        """删除 fact_memory 中 expires_at < now 的行（TTL 清理）"""
         now = datetime.now().isoformat()
         with self._get_conn() as conn:
             cursor = conn.cursor()
@@ -525,7 +525,7 @@ class AgentMemoryStore:
         owner_id: str = "",
         include_legacy: bool = False
     ) -> int:
-        """删除某次对话的所有记忆（v2.2 P0#2：owner 隔离，防止误删他人 session）
+        """删除某次对话的所有记忆（owner 隔离，防止误删他人 session）
 
         - owner_id 必传：仅删除属于该 owner 的数据
         - include_legacy=False（默认）：不删 owner_id='' 的存量无主数据

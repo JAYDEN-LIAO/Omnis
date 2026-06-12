@@ -12,7 +12,7 @@ from .memory_store import AgentMemoryStore
 
 logger = get_logger("agent.memory")
 
-# 修复 #4.2：working_memory 800 字符上限
+# working_memory 800 字符上限
 WORKING_MEMORY_MAX_CHARS = 800
 
 
@@ -24,15 +24,15 @@ class AgentMemoryManager:
         self.ttl_days = getattr(settings, 'AGENT_MEMORY_TTL_DAYS', 90)
 
     def _fresh_client(self):
-        """每次新建客户端（修复 #2.1：配置热刷新）"""
+        """每次新建客户端（配置热刷新）"""
         key, url, _ = get_agent_config()
         return OpenAI(api_key=key, base_url=url)
 
     def build_working_memory(self, session_id: str, owner_id: str = "") -> str:
         """
         对话开始时调用：检索长期记忆，构建【用户记忆】段落。
-        修复 #4.2：>800 字符时降级（只保留 entity+fact 两段）
-        v2.2 P0#2：owner_id 必传，store 内部按 (session_id, owner_id) 隔离检索
+        >800 字符时降级（只保留 entity+fact 两段）
+        owner_id 必传，store 内部按 (session_id, owner_id) 隔离检索
         """
         parts = []
 
@@ -75,7 +75,7 @@ class AgentMemoryManager:
 
         full = "\n\n".join(parts)
 
-        # 修复 #4.2：超 800 字符时降级
+        # 超 800 字符时降级
         if len(full) > WORKING_MEMORY_MAX_CHARS:
             degraded_parts = []
             for p in parts:
@@ -96,18 +96,18 @@ class AgentMemoryManager:
     ):
         """
         对话结束时调用（v2.2 per-user）：提取实体、写入 fact_memory、更新 pattern_memory、生成摘要。
-        v2.2 P0#2：owner_id 透传到所有 store 写入路径，避免多用户数据串读。
+        owner_id 透传到所有 store 写入路径，避免多用户数据串读。
         """
         summary = self._summarize_conversation(messages)
         # v2.2 P2.2：实体抽取从摘要改为原文（覆盖率大幅提升）
         entities = self._extract_entities_from_messages(messages)
         self.store.save_summary(session_id, summary, entities, outcome, owner_id)
 
-        # 4. 写入实体记忆（v2.2 P0#2：传 owner_id）
+        # 4. 写入实体记忆（传 owner_id）
         for entity_text, entity_type in entities:
             self.store.upsert_entity(session_id, entity_text, entity_type, owner_id=owner_id)
 
-        # 5. 分析并写入行为模式（v2.2 P0#2：传 owner_id）
+        # 5. 分析并写入行为模式（传 owner_id）
         self._analyze_and_write_patterns(session_id, messages, owner_id=owner_id)
 
         logger.info(f"[Memory] 已写入对话 {session_id} 的记忆：{len(entities)} 个实体 (owner={owner_id[:8] if owner_id else 'legacy'})")
@@ -144,7 +144,7 @@ class AgentMemoryManager:
 
     def _extract_entities(self, summary: str) -> List[tuple]:
         """
-        从摘要中提取实体（修复 #4.1：使用 jieba.posseg 替代硬编码白名单）。
+        从摘要中提取实体（使用 jieba.posseg 替代硬编码白名单）。
 
         词性映射：
             nr  → person  （人名）
@@ -242,7 +242,7 @@ class AgentMemoryManager:
         return self.store.cleanup_expired_all()
 
     def delete_session(self, session_id: str, owner_id: str = "") -> int:
-        """删除某次对话记忆（v2.2 P0#2：传 owner_id 限定删除范围）"""
+        """删除某次对话记忆（传 owner_id 限定删除范围）"""
         return self.store.delete_session(session_id, owner_id=owner_id)
 
     def get_stats(self) -> Dict[str, int]:

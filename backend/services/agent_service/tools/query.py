@@ -28,6 +28,7 @@ from services.radar_service.db_manager import (
 )
 
 from ._base import ToolResult, tool
+from ._constants import normalize_platform
 from ._owner import with_owner
 
 logger = get_logger("agent.tools.query")
@@ -42,7 +43,7 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
-# L4 v2.2: 搜索关键词清洗
+# 搜索关键词清洗
 # - 剥离前后空白
 # - 截断到 64 字符
 # - 移除控制字符（防日志注入 / 终端欺骗）
@@ -110,24 +111,15 @@ def search_alerts_tool(
     end_time: Optional[str] = None,
     limit: int = 10,
 ) -> str:
-    # L4 v2.2: 关键词清洗
+    # 关键词清洗
     keyword = _sanitize_keyword(keyword)
     # 限制 limit 上限（即便 schema 限定 50，再加一道程序保护）
     if limit <= 0 or limit > 50:
         limit = 10
     start_dt = _parse_iso(start_time)
     end_dt = _parse_iso(end_time)
-    # 平台别名归一
-    platform_alias = {
-        "weibo": "微博", "wb": "微博",
-        "xhs": "小红书",
-        "douyin": "抖音", "dy": "抖音",
-        "bilibili": "B站", "bili": "B站",
-        "zhihu": "知乎",
-        "tieba": "贴吧",
-        "kuaishou": "快手", "ks": "快手",
-    }
-    platform_cn = platform_alias.get(platform) if platform else None
+    # 平台别名归一（v2.2 P4.3：统一走 _constants）
+    platform_normalized = normalize_platform(platform) if platform else None
 
     items: list[dict] = []
 
@@ -143,7 +135,7 @@ def search_alerts_tool(
                 continue
             if keyword and keyword not in (r.get("keyword") or ""):
                 continue
-            if platform_cn and platform_cn not in (r.get("platform") or ""):
+            if platform_normalized and platform_normalized not in (r.get("platform") or ""):
                 continue
             t = _parse_iso(r.get("publish_time")) or _parse_iso(r.get("create_time"))
             if start_dt and t and t < start_dt:

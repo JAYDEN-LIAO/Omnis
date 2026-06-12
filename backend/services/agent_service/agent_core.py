@@ -72,12 +72,12 @@ class TokenBudgetManager:
         self.budget = budget or getattr(settings, 'AGENT_TOKEN_BUDGET', 1500)
 
     def _fresh_client(self):
-        """每次返回新 OpenAI 客户端实例（修复 #2.1：配置热刷新）"""
+        """每次返回新 OpenAI 客户端实例（配置热刷新）"""
         key, url, _ = get_agent_config()
         return OpenAI(api_key=key, base_url=url)
 
     def count_tokens(self, messages: list) -> int:
-        """估算 tokens（修复 #2.2：char/2 而非 char/4，中文偏差 < 20%）"""
+        """估算 tokens（char/2 而非 char/4，中文偏差 < 20%）"""
         total = 0
         for m in messages:
             # ChatCompletionMessage 等 SDK 对象无法 json.dumps，先转 dict
@@ -90,7 +90,7 @@ class TokenBudgetManager:
         return self.count_tokens(messages) > self.budget
 
     def summarize_history(self, messages: list) -> list:
-        """将历史压缩为摘要（修复 #2.1：使用 get_agent_config 替代硬编码 deepseek-chat）"""
+        """将历史压缩为摘要（使用 get_agent_config 替代硬编码 deepseek-chat）"""
         # 保留 system prompt + 最近 2 条 + 摘要
         system = messages[0] if messages and messages[0]["role"] == "system" else None
         recent = messages[-4:] if len(messages) > 4 else messages
@@ -202,7 +202,7 @@ class ToolExecutor:
                 status_label = "error"
                 raise
             finally:
-                # 记录指标（修复 #2.4）
+                # 记录指标
                 latency = _time.perf_counter() - start_ts
                 AGENT_TOOL_CALLS.labels(tool=tool_name, status=status_label).inc()
                 AGENT_TOOL_LATENCY.labels(tool=tool_name).observe(latency)
@@ -239,7 +239,7 @@ class ToolExecutor:
 
 # ==================== Agent 主循环 ====================
 
-# 全局组件实例（修复 #2.1：客户端不缓存，每次 _get_agent_client 重新创建以支持热刷新）
+# 全局组件实例（客户端不缓存，每次 _get_agent_client 重新创建以支持热刷新）
 memory_manager = AgentMemoryManager()
 reflection_engine = ReflectionEngine()
 token_budget_manager = TokenBudgetManager()
@@ -255,14 +255,13 @@ def _get_agent_config_for(owner_id: str = ""):
 
 
 def _get_agent_client(owner_id: str = ""):
-    """返回全新 OpenAI 客户端（修复 #2.1：配置热刷新）"""
+    """返回全新 OpenAI 客户端（配置热刷新）"""
     key, url, _ = _get_agent_config_for(owner_id)
     return OpenAI(api_key=key, base_url=url)
 
 
-# ==================== v2.2 P1#19：每 session 最多 1 次 medi 追问 ====================
-# 原 `medi_count = 0` 在 chat_with_agent_stream 顶部声明，每次新用户消息调用函数时
-# 都重置为 0，注释"每 session 最多 1 次"实际是"每 chat 调用最多 1 次"。
+# ==================== 每 session 最多 1 次 medi 追问 ====================
+# 每新用户消息调用函数时 medi_count 重置为 0，
 # 改为 session 级状态：module-level dict + TTL 懒清理，跨 chat 调用共享计数。
 _SESSION_MEDI_TTL_SEC = 3600  # 1 小时不活跃即清空（防止内存膨胀）
 _session_medi_followups: dict[str, tuple[int, float]] = {}  # session_id -> (count, last_used_ts)
