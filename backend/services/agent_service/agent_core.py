@@ -619,23 +619,41 @@ async def _write_memory_async(
     owner_id: str = "",
     _text_collector: list = None,
 ):
-    """异步写入对话记忆 + 聊天消息（v2.3）"""
-    try:
-        memory_manager.write_from_conversation(session_id, messages, owner_id=owner_id)
-        AGENT_MEMORY_WRITES.labels(status="success").inc()
-    except Exception as e:
-        AGENT_MEMORY_WRITES.labels(status="error").inc()
-        logger.error(f"记忆写入失败: {e}")
-
-    # 同步保存聊天消息（含本次 assistant 回复）
-    if session_id and messages:
+    """
+    异步写入对话记忆 + 聊天消息（v2.2 P3.1：失败重试一次）。
+    """
+    # 重试一次：首次失败 sleep 1s 再试
+    last_err = None
+    for attempt in range(2):
         try:
-            all_messages = list(messages)
-            if _text_collector is not None:
-                assistant_text = "".join(_text_collector).strip()
-                if assistant_text:
-                    all_messages.append({"role": "assistant", "content": assistant_text})
-            memory_manager.store.replace_messages(session_id, owner_id, all_messages)
-            logger.info(f"[ChatMessages] session {session_id[:8]} 已保存 {len(all_messages)} 条消息")
+            memory_manager.write_from_conversation(session_id, messages, owner_id=owner_id)
+            AGENT_MEMORY_WRITES.labels(status="success").inc()
+            last_err = None
+            break
         except Exception as e:
-            logger.error(f"[ChatMessages] 保存失败: {e}")
+            last_err = e
+            logger.warning(f"[MemoryWrite] 第 {attempt+1} 次失败: {e}")
+            if attempt == 0:
+                await asyncio.sleep(1)
+    if last_err:
+        AGENT_MEMORY_WRITES.labels(status="error").inc()
+        logger.error(f"记忆写入彻底失败: {last_err}")
+
+    # chat_messages 写入（同样加重试）
+    if session_id and messages:
+        for attempt in range(2):
+            try:
+                all_messages = list(messages)
+                if _text_collector is not None:
+                    assistant_text = "".join(_text_collector).strip()
+                    if assistant_text:
+                        all_messages.append({"role": "assistant", "content": assistant_text})
+                memory_manager.store.replace_messages(session_id, owner_id, all_messages)
+                logger.info(f"[ChatMessages] session {session_id[:8]} 已保存 {len(all_messages)} 条消息")
+                break
+            except Exception as e:
+                logger.warning(f"[ChatMessages] 第 {attempt+1} 次失败: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                else:
+                    logger.error(f"[ChatMessages] 保存彻底失败: {e}")
