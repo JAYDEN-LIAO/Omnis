@@ -12,6 +12,8 @@ P1.8 阶段：追加 get_system_overview / get_recent_activity / health_check
 """
 from __future__ import annotations
 
+import json
+
 from core.database import get_db_connection
 from core.logger import get_logger
 
