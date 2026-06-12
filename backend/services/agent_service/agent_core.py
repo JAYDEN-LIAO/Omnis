@@ -36,6 +36,33 @@ from .memory import AgentMemoryManager
 from .reflection import ReflectionEngine
 from .diagnosis import DiagnosisEngine
 
+# ==================== v2.2 P1: Agent Context ====================
+from dataclasses import dataclass, field
+from typing import List as _List, Optional as _Optional
+
+@dataclass
+class AgentContext:
+    """v2.2 P1：统一状态对象，贯穿所有 phase 函数。"""
+    session_id: str
+    owner_id: str
+    request: dict
+    messages: list                                  # 原始用户消息
+    current_messages: list = field(default_factory=list)
+    text_collector: _Optional[list] = None
+    max_iterations: int = 6
+    iteration: int = 0
+    final_text: str = ""
+
+
+# ==================== v2.2 P1: 工具结果截断 ====================
+def _truncate_tool_result(result_str: str) -> str:
+    """工具返回结果超过上限时截断，避免 LLM 上下文爆炸。"""
+    max_chars = getattr(settings, "AGENT_MAX_TOOL_RESULT_CHARS", 3000)
+    if len(result_str) > max_chars:
+        return result_str[:max_chars] + f"\n\n...(结果已截断，共 {len(result_str)} 字符)"
+    return result_str
+
+
 # ==================== Token Budget Manager ====================
 
 class TokenBudgetManager:
@@ -134,6 +161,7 @@ class ToolExecutor:
         import time as _time
         start_ts = _time.perf_counter()
         status_label = "success"
+        _owner_id = (_request or {}).get("owner_id", "")
 
         # 优先直调
         if self.direct.supports(tool_name):
@@ -147,7 +175,8 @@ class ToolExecutor:
                         "_request": _request,
                     },
                     tool_name=tool_name,
-                    other_tools={k: v for k, v in AVAILABLE_TOOLS.items() if k != tool_name}
+                    other_tools={k: v for k, v in AVAILABLE_TOOLS.items() if k != tool_name},
+                    owner_id=_owner_id,
                 )
                 # 解析 DirectAdapter.execute 返回（它是两层 JSON）
                 parsed = json.loads(result)
@@ -164,7 +193,8 @@ class ToolExecutor:
                                 "on_progress": on_progress,
                                 "_request": _request,
                             },
-                            tool_name=tool_name
+                            tool_name=tool_name,
+                            owner_id=_owner_id,
                         )
                         return mcp_result
                 return result
@@ -188,7 +218,8 @@ class ToolExecutor:
                         "on_progress": on_progress,
                         "_request": _request,
                     },
-                    tool_name=tool_name
+                    tool_name=tool_name,
+                    owner_id=_owner_id,
                 )
             except Exception as e:
                 status_label = "error"
@@ -279,44 +310,181 @@ def _get_medi_slot_status(session_id: str) -> dict:
     }
 
 
-def _stream_response(messages: list, owner_id: str = "", _text_collector: list = None):
-    """同步流式响应生成器"""
-    client = _get_agent_client(owner_id)
-    _, _, model = _get_agent_config_for(owner_id)
-    response = client.chat.completions.create(
-        model=model or settings.DEFAULT_MODEL,
-        messages=messages,
-        stream=True,
-    )
-    for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content is not None:
-            text = chunk.choices[0].delta.content
-            if _text_collector is not None:
-                _text_collector.append(text)
-            yield emit_text(text)
+
+# ==================== v2.2 P1: 阶段函数 ====================
+def phase_build_context(ctx: AgentContext):
+    """构造 current_messages，注入 system prompt + 长期记忆。"""
+    system_prompt = {
+        "role": "system",
+        "content": "你是 MediaRadar 媒体信息订阅平台的 AI 管家。回答专业简洁，用中文。"
+    }
+    working_memory = memory_manager.build_working_memory(ctx.session_id, owner_id=ctx.owner_id)
+    if working_memory:
+        system_prompt["content"] += f"\n\n【用户记忆】\n{working_memory}"
+    ctx.current_messages = [system_prompt] + list(ctx.messages)
+    # 首次 token 预算检查
+    if token_budget_manager.should_summarize(ctx.current_messages):
+        ctx.current_messages = token_budget_manager.summarize_history(ctx.current_messages)
+    ctx.max_iterations = getattr(settings, "AGENT_MAX_ITERATIONS", 6)
 
 
-async def _stream_response_async(messages: list, owner_id: str = "", _text_collector: list = None):
-    """异步流式响应（v2.2：AsyncOpenAI + async for）"""
-    key, url, model = _get_agent_config_for(owner_id)
+def phase_think(ctx: AgentContext):
+    """LLM 调用 + 3 次重试。返回 (msg, tool_calls) 或 (None, None)。"""
+    for attempt in range(3):
+        try:
+            client = _get_agent_client(ctx.owner_id)
+            _, _, model = _get_agent_config_for(ctx.owner_id)
+            response = client.chat.completions.create(
+                model=model or settings.DEFAULT_MODEL,
+                messages=ctx.current_messages,
+                tools=TOOLS_SCHEMA,
+                tool_choice="auto",
+            )
+            msg = response.choices[0].message
+            if msg.content:
+                msg.content = (
+                    msg.content.replace("<|DSML|>", "").replace("</|DSML|>", "").strip()
+                )
+            return msg, msg.tool_calls
+        except Exception as e:
+            logger.warning(f"[phase_think] 第 {attempt+1} 次失败: {e}")
+            if attempt == 2:
+                logger.error(f"[phase_think] 3 次重试全部失败: {e}")
+                return None, None
+            time.sleep(2 ** attempt)
+    return None, None
+
+
+async def phase_respond(ctx: AgentContext):
+    """流式生成最终回答。AsyncOpenAI 失败时 emit_error，不静默。"""
+    # 提示 LLM 用自然语言回答
+    ctx.current_messages.append({
+        "role": "system",
+        "content": "请用自然语言回答用户，不要输出JSON或代码格式。"
+    })
     try:
+        key, url, model = _get_agent_config_for(ctx.owner_id)
         client = AsyncOpenAI(api_key=key, base_url=url)
         response = await client.chat.completions.create(
             model=model or settings.DEFAULT_MODEL,
-            messages=messages,
+            messages=ctx.current_messages,
             stream=True,
         )
         async for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 text = chunk.choices[0].delta.content
-                if _text_collector is not None:
-                    _text_collector.append(text)
+                if ctx.text_collector is not None:
+                    ctx.text_collector.append(text)
                 yield emit_text(text)
     except Exception as e:
-        logger.error(f"[StreamAsync] 异步流式失败: {e}", exc_info=True)
-        # 回退到同步版本
-        for chunk in _stream_response(messages, owner_id, _text_collector=_text_collector):
-            yield chunk
+        logger.error(f"[phase_respond] 流式生成失败: {e}", exc_info=True)
+        yield emit_error(f"生成回复失败: {e}", error_type="stream_error")
+
+
+async def phase_act(ctx: AgentContext, tool_call):
+    """
+    执行单个工具。yield SSE 事件，最后 yield 一个 _PHASE_ACT_DONE 信号携带解析结果。
+    失败/超时 yield emit_error 但不中断流程，由主循环 continue 走下一轮。
+    """
+    from collections import deque
+
+    call_id = tool_call.id
+    name = tool_call.function.name
+    try:
+        args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+    except Exception:
+        args = {}
+
+    yield emit_tool_call(call_id, name, args)
+
+    progress_queue = deque()
+
+    def on_progress(partial, _cid=call_id):
+        progress_queue.append((_cid, partial))
+
+    try:
+        result = await asyncio.wait_for(
+            tool_executor.execute(
+                name, args, ctx.current_messages,
+                on_progress=on_progress, _request=ctx.request,
+            ),
+            timeout=getattr(settings, "AGENT_TOOL_TIMEOUT", 120),
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"[phase_act] 工具 {name} 超时")
+        yield emit_error(f"工具 {name} 执行超时", error_type="timeout", call_id=call_id)
+        yield _PHASE_ACT_DONE(None)
+        return
+    except Exception as e:
+        logger.error(f"[phase_act] 工具 {name} 异常: {e}", exc_info=True)
+        yield emit_error(f"工具 {name} 执行失败: {e}", error_type="tool_error", call_id=call_id)
+        yield _PHASE_ACT_DONE(None)
+        return
+
+    # flush progress
+    while progress_queue:
+        yield emit_tool_progress(*progress_queue.popleft())
+
+    # 截断
+    result = _truncate_tool_result(result)
+
+    # 解析
+    try:
+        parsed = json.loads(result)
+    except Exception:
+        parsed = {"success": False, "data": None, "error": "工具返回非 JSON", "error_type": "tool_format_error"}
+
+    yield emit_tool_result(
+        call_id=call_id,
+        success=parsed.get("success", False),
+        data=parsed.get("data"),
+        ui=parsed.get("ui") or {},
+        error=parsed.get("error", ""),
+        error_type=parsed.get("error_type", ""),
+    )
+    yield _PHASE_ACT_DONE(parsed)
+
+
+_PHASE_ACT_DONE_MARKER = "__phase_act_result__"
+
+
+def _PHASE_ACT_DONE(value):
+    """phase_act 完成信号（async generator 不能 return value，用 yield 替代）"""
+    return {_PHASE_ACT_DONE_MARKER: value}
+
+
+def phase_evaluate(ctx: AgentContext, tool_result: dict) -> str:
+    """
+    评估工具结果。返回 "high" | "medi" | "low"。
+    失败时返回 "high"（不阻塞主流程）。
+    """
+    try:
+        tool_result_str = json.dumps(tool_result, ensure_ascii=False)
+        user_q = ctx.messages[-1]["content"] if ctx.messages else ""
+        eval_result = reflection_engine.evaluate(
+            user_q, tool_result_str, owner_id=ctx.owner_id
+        )
+        confidence = eval_result.get("confidence", "high")
+        if confidence not in ("high", "medi", "low"):
+            return "high"
+        return confidence
+    except Exception as e:
+        logger.warning(f"[phase_evaluate] 异常: {e}")
+        return "high"
+
+
+async def phase_finish(ctx: AgentContext, final_text: str = ""):
+    """
+    统一收尾。所有 exit 都走这里（无遗漏）。emit_done 后异步写记忆。
+    """
+    if final_text:
+        if ctx.text_collector is not None:
+            ctx.text_collector.append(final_text)
+        yield emit_text(final_text)
+    yield emit_done()
+    asyncio.create_task(_write_memory_async(
+        ctx.session_id, ctx.messages, ctx.owner_id, ctx.text_collector
+    ))
 
 
 async def chat_with_agent_stream(
@@ -325,247 +493,124 @@ async def chat_with_agent_stream(
     _request: Optional[dict] = None,
 ):
     """
-    Agent 主循环（v2.2 P2：SSE 多事件协议）
+    Agent 主循环（v2.2 P1 重构版）
 
     事件顺序：text / tool_call / [tool_progress]* / tool_result / text / done
-    流式工具（标记 streamable=True）通过 on_progress 推 partial，非流式工具不推。
-
-    _request: 透传上下文（owner_id / session_id / trace_id 等）；
-              工具函数声明 _request=None 即可接收；与 contextvar 双重保险。
+    统一收尾：所有 exit 都走 phase_finish()，修复原版漏写 _write_memory_async 的 bug。
     """
     session_id = session_id or str(uuid.uuid4())
     owner_id = (_request or {}).get("owner_id", "")
     _text_collector: list = (_request or {}).get("_text_collector")
 
-    # 构建 system prompt
-    system_prompt = {
-        "role": "system",
-        "content": "你是 MediaRadar 媒体信息订阅平台的 AI 管家。回答专业简洁，用中文。"
-    }
+    ctx = AgentContext(
+        session_id=session_id,
+        owner_id=owner_id,
+        request=_request or {},
+        messages=messages,
+        text_collector=_text_collector,
+    )
+    phase_build_context(ctx)
 
-    # 检索长期记忆，注入 system prompt（v2.2 P0#2：传 owner_id 实现 per-user 隔离）
-    working_memory = memory_manager.build_working_memory(session_id, owner_id=owner_id)
-    if working_memory:
-        system_prompt["content"] += f"\n\n【用户记忆】\n{working_memory}"
+    for i in range(ctx.max_iterations):
+        ctx.iteration = i
+        logger.info(f"[Agent Core] 第 {i+1} 轮思考")
+        AGENT_TURNS.inc()
 
-    # 构建上下文
-    current_messages = [system_prompt] + messages
-
-    # Token 预算检查
-    if token_budget_manager.should_summarize(current_messages):
-        logger.info("[TokenBudget] 超出预算，执行 context summarization...")
-        current_messages = token_budget_manager.summarize_history(current_messages)
-
-    max_iterations = getattr(settings, 'AGENT_MAX_ITERATIONS', 6)
-
-    # v2.2 P1#19：medi 追问次数上限改为 session 级（见 _try_acquire_medi_slot）
-
-    for i in range(max_iterations):
-        logger.info(f"[Agent Core] 正在评估意图 (第 {i+1} 轮思考)...")
-        AGENT_TURNS.inc()  # 修复 #2.4
-
-        # 生成回复（每次新建 client，支持热刷新，v2.2 per-user）
-        client = _get_agent_client(owner_id)
-        _, _, model_name = _get_agent_config_for(owner_id)
-        response = client.chat.completions.create(
-            model=model_name or settings.DEFAULT_MODEL,
-            messages=current_messages,
-            tools=TOOLS_SCHEMA,
-            tool_choice="auto"
-        )
-
-        response_message = response.choices[0].message
-        tool_calls = response_message.tool_calls
-
-        if tool_calls:
-            # 清理 response_message.content 中的 <|DSML|> 标记，防止模型原始文本泄露给前端
-            raw_content = response_message.content or ""
-            cleaned_content = raw_content.replace("<|DSML|>", "").replace("</|DSML|>", "").strip()
-            msg_dump = response_message.model_dump()
-            msg_dump["content"] = cleaned_content
-            current_messages.append(msg_dump)
-
-            for tool_call in tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                call_id = tool_call.id
-                logger.info(f"[Agent Core] 决定调用工具: {function_name} | 参数: {function_args}")
-
-                # ===== P2 SSE：先发 tool_call，再决定是否走流式分支 =====
-                yield emit_tool_call(call_id, function_name, function_args)
-
-                # 透传给 on_progress 的回调：流式工具的 partial → SSE tool_progress
-                is_streamable = function_name in STREAMABLE_TOOLS
-
-                def _on_progress(partial: dict, _cid=call_id) -> None:
-                    # 这里不能 yield（回调不是 async gen），改用 push 到一个 list
-                    progress_queue.append((_cid, partial))
-
-                progress_queue: list = []
-
-                # 用 asyncio.Task 包装工具执行，边执行边 flush progress 事件（实时 SSE）
-                execute_task = asyncio.create_task(
-                    tool_executor.execute(
-                        function_name,
-                        function_args,
-                        current_messages,
-                        on_progress=_on_progress,
-                        _request=_request,
-                    )
-                )
-
-                try:
-                    while True:
-                        done, _ = await asyncio.wait([execute_task], timeout=2.0)
-                        # 每 2 秒 flush 一次已累积的 progress 事件
-                        while progress_queue:
-                            _cid, partial = progress_queue.pop(0)
-                            yield emit_tool_progress(_cid, partial)
-                        if done:
-                            break
-                    tool_result = execute_task.result()
-                except Exception as e:
-                    err_msg = f"工具执行异常: {e}"
-                    logger.error(f"[Agent Core] {err_msg}")
-                    yield emit_error(err_msg, error_type="tool_execution_error", call_id=call_id)
-                    yield emit_done()
-                    return
-
-                # 最后再清一次 progress_queue
-                while progress_queue:
-                    _cid, partial = progress_queue.pop(0)
-                    yield emit_tool_progress(_cid, partial)
-
-                # 解析 tool_result → 拆 success/data/ui/error
-                try:
-                    parsed = json.loads(tool_result)
-                except Exception:
-                    parsed = {"success": False, "data": None, "error": "工具返回非 JSON", "error_type": "tool_format_error"}
-
-                # 触发 trigger_scan 走特殊路径：立即发文本（v2.2 P0#6: trigger_background_crawl 已废弃并移除注册）
-                if function_name == "trigger_scan":
-                    current_messages.append({
-                        "tool_call_id": call_id, "role": "tool", "name": function_name,
-                        "content": tool_result,
-                    })
-                    yield emit_tool_result(
-                        call_id=call_id,
-                        success=parsed.get("success", False),
-                        data=parsed.get("data"),
-                        ui=parsed.get("ui") or {"type": "scan_progress", "data": {"status": "started"}},
-                        error=parsed.get("error", ""),
-                        error_type=parsed.get("error_type", ""),
-                    )
-                    async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
-                        yield chunk
-                    yield emit_done()
-                    asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
-                    return
-
-                # 其他工具：tool_result 事件 + Reflection 分支
-                yield emit_tool_result(
-                    call_id=call_id,
-                    success=parsed.get("success", False),
-                    data=parsed.get("data"),
-                    ui=parsed.get("ui") or {},
-                    error=parsed.get("error", ""),
-                    error_type=parsed.get("error_type", ""),
-                )
-
-                current_messages.append({
-                    "tool_call_id": call_id, "role": "tool", "name": function_name,
-                    "content": tool_result,
-                })
-
-                # Reflection
-                try:
-                    user_q = messages[-1]["content"] if messages else ""
-                    eval_result = reflection_engine.evaluate(user_q, tool_result, owner_id=owner_id)
-                    confidence = eval_result.get("confidence", "high")
-
-                    if confidence == "low":
-                        degrade_answer = reflection_engine.get_degrade_answer(tool_result)
-                        current_messages.append({
-                            "role": "assistant", "content": degrade_answer
-                        })
-                        async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
-                            yield chunk
-                        yield emit_done()
-                        asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
-                        return
-
-                    elif confidence == "medi":
-                        medi_action = reflection_engine.handle_medi(
-                            user_q, tool_result, eval_result.get("missing_info", ""), owner_id=owner_id
-                        )
-                        # v2.2 P1#19：每 session 最多 1 次 follow_up（跨 chat 调用共享）
-                        can_follow_up = (
-                            medi_action.get("action") == "follow_up"
-                            and _try_acquire_medi_slot(session_id)
-                        )
-                        if not can_follow_up:
-                            degrade_answer = (
-                                medi_action.get("degrade_answer", "")
-                                if "degrade_answer" in medi_action
-                                else reflection_engine.get_degrade_answer(tool_result)
-                            )
-                            current_messages.append({
-                                "role": "assistant", "content": degrade_answer
-                            })
-                            async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
-                                yield chunk
-                            yield emit_done()
-                            asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
-                            return
-
-                        # 第一次 follow_up（_try_acquire_medi_slot 已 +1）
-                        follow_up_q = medi_action.get("follow_up_question", "")
-                        current_messages.append({
-                            "role": "user", "content": f"【系统追问】{follow_up_q}"
-                        })
-                        continue
-
-                    # high: 继续循环（下一轮 LLM 决策）
-                except Exception as e:
-                    logger.error(f"Reflection 处理异常: {e}")
-                    # 异常不阻塞主流程，继续
-
-            # Token 预算检查
-            try:
-                if token_budget_manager.should_summarize(current_messages):
-                    current_messages = token_budget_manager.summarize_history(current_messages)
-            except Exception as _e:
-                logger.warning(f"[Agent Core] Token 摘要失败: {_e}")
-
-            continue
-
-        else:
-            # 无工具调用，生成最终回答
-            logger.info("[Agent Core] 思考完毕，正在生成最终流式总结...")
-
-            current_messages.append({
-                "role": "system",
-                "content": "请用自然语言回答用户，不要输出JSON或代码格式。"
-            })
-
-            try:
-                async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
-                    yield chunk
-            except Exception as _e:
-                logger.error(f"[Agent Core] 最终流式生成失败: {_e}", exc_info=True)
-                yield emit_error(f"生成回复失败: {_e}", error_type="stream_error")
-            yield emit_done()
-
-            asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
+        # 1) Think
+        msg, tool_calls = phase_think(ctx)
+        if msg is None:
+            async for chunk in phase_finish(ctx, "LLM 调用失败，请稍后重试。"):
+                yield chunk
             return
 
+        # 把 assistant 消息加入上下文
+        ctx.current_messages.append(msg.model_dump())
+
+        if not tool_calls:
+            # 2) Respond (无工具调用 → 流式回答)
+            async for chunk in phase_respond(ctx):
+                yield chunk
+            async for chunk in phase_finish(ctx):
+                yield chunk
+            return
+
+        # 3) Act + Evaluate (对每个 tool_call)
+        for tc in tool_calls:
+            parsed = None
+            gen = phase_act(ctx, tc)
+            try:
+                while True:
+                    chunk = await gen.__anext__()
+                    if isinstance(chunk, dict) and _PHASE_ACT_DONE_MARKER in chunk:
+                        parsed = chunk[_PHASE_ACT_DONE_MARKER]
+                        break
+                    yield chunk
+            except Exception as e:
+                logger.error(f"[MainLoop] phase_act 异常: {e}", exc_info=True)
+                yield emit_error(f"工具执行异常: {e}", error_type="tool_execution_error", call_id=tc.id)
+                parsed = None
+
+            if parsed is None:
+                continue  # 工具失败/超时，让 LLM 下一轮决定
+
+            # 工具结果入上下文
+            ctx.current_messages.append({
+                "tool_call_id": tc.id, "role": "tool", "name": tc.function.name,
+                "content": json.dumps(parsed, ensure_ascii=False),
+            })
+
+            # 4) Evaluate
+            confidence = phase_evaluate(ctx, parsed)
+
+            if confidence == "low":
+                degrade = reflection_engine.get_degrade_answer(json.dumps(parsed, ensure_ascii=False))
+                ctx.final_text = degrade
+                async for chunk in phase_finish(ctx, degrade):
+                    yield chunk
+                return
+
+            if confidence == "medi":
+                if _try_acquire_medi_slot(ctx.session_id):
+                    user_q = ctx.messages[-1]["content"] if ctx.messages else ""
+                    missing = ""
+                    medi_action = reflection_engine.handle_medi(
+                        user_q,
+                        json.dumps(parsed, ensure_ascii=False),
+                        missing,
+                        owner_id=ctx.owner_id,
+                    )
+                    follow_up = medi_action.get("follow_up_question", "")
+                    if follow_up:
+                        ctx.current_messages.append({
+                            "role": "user",
+                            "content": f"【系统追问】{follow_up}",
+                        })
+                        continue
+                    # 没拿到 follow_up_question → 降级
+                    degrade = (
+                        medi_action.get("degrade_answer", "")
+                        or reflection_engine.get_degrade_answer(json.dumps(parsed, ensure_ascii=False))
+                    )
+                    async for chunk in phase_finish(ctx, degrade):
+                        yield chunk
+                    return
+                else:
+                    degrade = reflection_engine.get_degrade_answer(json.dumps(parsed, ensure_ascii=False))
+                    async for chunk in phase_finish(ctx, degrade):
+                        yield chunk
+                    return
+            # high → 继续
+
+        # 5) Token 预算检查（每轮迭代后）
+        try:
+            if token_budget_manager.should_summarize(ctx.current_messages):
+                ctx.current_messages = token_budget_manager.summarize_history(ctx.current_messages)
+        except Exception as e:
+            logger.warning(f"[Agent Core] Token 摘要失败: {e}")
+
     # 超过最大迭代次数
-    _final_text = "抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。"
-    if _text_collector is not None:
-        _text_collector.append(_final_text)
-    yield emit_text(_final_text)
-    yield emit_done()
-    asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
+    async for chunk in phase_finish(ctx, "抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。"):
+        yield chunk
 
 
 async def _write_memory_async(
