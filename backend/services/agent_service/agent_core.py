@@ -279,7 +279,7 @@ def _get_medi_slot_status(session_id: str) -> dict:
     }
 
 
-def _stream_response(messages: list, owner_id: str = ""):
+def _stream_response(messages: list, owner_id: str = "", _text_collector: list = None):
     """同步流式响应生成器"""
     client = _get_agent_client(owner_id)
     _, _, model = _get_agent_config_for(owner_id)
@@ -290,10 +290,13 @@ def _stream_response(messages: list, owner_id: str = ""):
     )
     for chunk in response:
         if chunk.choices and chunk.choices[0].delta.content is not None:
-            yield emit_text(chunk.choices[0].delta.content)
+            text = chunk.choices[0].delta.content
+            if _text_collector is not None:
+                _text_collector.append(text)
+            yield emit_text(text)
 
 
-async def _stream_response_async(messages: list, owner_id: str = ""):
+async def _stream_response_async(messages: list, owner_id: str = "", _text_collector: list = None):
     """异步流式响应（v2.2：AsyncOpenAI + async for）"""
     key, url, model = _get_agent_config_for(owner_id)
     try:
@@ -305,11 +308,14 @@ async def _stream_response_async(messages: list, owner_id: str = ""):
         )
         async for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
-                yield emit_text(chunk.choices[0].delta.content)
+                text = chunk.choices[0].delta.content
+                if _text_collector is not None:
+                    _text_collector.append(text)
+                yield emit_text(text)
     except Exception as e:
         logger.error(f"[StreamAsync] 异步流式失败: {e}", exc_info=True)
         # 回退到同步版本
-        for chunk in _stream_response(messages, owner_id):
+        for chunk in _stream_response(messages, owner_id, _text_collector=_text_collector):
             yield chunk
 
 
@@ -329,6 +335,7 @@ async def chat_with_agent_stream(
     """
     session_id = session_id or str(uuid.uuid4())
     owner_id = (_request or {}).get("owner_id", "")
+    _text_collector: list = (_request or {}).get("_text_collector")
 
     # 构建 system prompt
     system_prompt = {
@@ -396,14 +403,27 @@ async def chat_with_agent_stream(
 
                 progress_queue: list = []
 
-                try:
-                    tool_result = await tool_executor.execute(
+                # 用 asyncio.Task 包装工具执行，边执行边 flush progress 事件（实时 SSE）
+                execute_task = asyncio.create_task(
+                    tool_executor.execute(
                         function_name,
                         function_args,
                         current_messages,
                         on_progress=_on_progress,
                         _request=_request,
                     )
+                )
+
+                try:
+                    while True:
+                        done, _ = await asyncio.wait([execute_task], timeout=2.0)
+                        # 每 2 秒 flush 一次已累积的 progress 事件
+                        while progress_queue:
+                            _cid, partial = progress_queue.pop(0)
+                            yield emit_tool_progress(_cid, partial)
+                        if done:
+                            break
+                    tool_result = execute_task.result()
                 except Exception as e:
                     err_msg = f"工具执行异常: {e}"
                     logger.error(f"[Agent Core] {err_msg}")
@@ -411,8 +431,9 @@ async def chat_with_agent_stream(
                     yield emit_done()
                     return
 
-                # 把 progress_queue 里的 partial 全 yield 出去
-                for _cid, partial in progress_queue:
+                # 最后再清一次 progress_queue
+                while progress_queue:
+                    _cid, partial = progress_queue.pop(0)
                     yield emit_tool_progress(_cid, partial)
 
                 # 解析 tool_result → 拆 success/data/ui/error
@@ -435,10 +456,10 @@ async def chat_with_agent_stream(
                         error=parsed.get("error", ""),
                         error_type=parsed.get("error_type", ""),
                     )
-                    async for chunk in _stream_response_async(current_messages, owner_id):
+                    async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
                         yield chunk
                     yield emit_done()
-                    asyncio.create_task(_write_memory_async(session_id, messages, owner_id))
+                    asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
                     return
 
                 # 其他工具：tool_result 事件 + Reflection 分支
@@ -459,7 +480,7 @@ async def chat_with_agent_stream(
                 # Reflection
                 try:
                     user_q = messages[-1]["content"] if messages else ""
-                    eval_result = reflection_engine.evaluate(user_q, tool_result)
+                    eval_result = reflection_engine.evaluate(user_q, tool_result, owner_id=owner_id)
                     confidence = eval_result.get("confidence", "high")
 
                     if confidence == "low":
@@ -467,15 +488,15 @@ async def chat_with_agent_stream(
                         current_messages.append({
                             "role": "assistant", "content": degrade_answer
                         })
-                        async for chunk in _stream_response_async(current_messages, owner_id):
+                        async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
                             yield chunk
                         yield emit_done()
-                        asyncio.create_task(_write_memory_async(session_id, messages, owner_id))
+                        asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
                         return
 
                     elif confidence == "medi":
                         medi_action = reflection_engine.handle_medi(
-                            user_q, tool_result, eval_result.get("missing_info", "")
+                            user_q, tool_result, eval_result.get("missing_info", ""), owner_id=owner_id
                         )
                         # v2.2 P1#19：每 session 最多 1 次 follow_up（跨 chat 调用共享）
                         can_follow_up = (
@@ -491,10 +512,10 @@ async def chat_with_agent_stream(
                             current_messages.append({
                                 "role": "assistant", "content": degrade_answer
                             })
-                            async for chunk in _stream_response_async(current_messages, owner_id):
+                            async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
                                 yield chunk
                             yield emit_done()
-                            asyncio.create_task(_write_memory_async(session_id, messages, owner_id))
+                            asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
                             return
 
                         # 第一次 follow_up（_try_acquire_medi_slot 已 +1）
@@ -528,27 +549,48 @@ async def chat_with_agent_stream(
             })
 
             try:
-                async for chunk in _stream_response_async(current_messages, owner_id):
+                async for chunk in _stream_response_async(current_messages, owner_id, _text_collector=_text_collector):
                     yield chunk
             except Exception as _e:
                 logger.error(f"[Agent Core] 最终流式生成失败: {_e}", exc_info=True)
                 yield emit_error(f"生成回复失败: {_e}", error_type="stream_error")
             yield emit_done()
 
-            asyncio.create_task(_write_memory_async(session_id, messages, owner_id))
+            asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
             return
 
     # 超过最大迭代次数
-    yield emit_text("抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。")
+    _final_text = "抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。"
+    if _text_collector is not None:
+        _text_collector.append(_final_text)
+    yield emit_text(_final_text)
     yield emit_done()
-    asyncio.create_task(_write_memory_async(session_id, messages, owner_id))
+    asyncio.create_task(_write_memory_async(session_id, messages, owner_id, _text_collector=_text_collector))
 
 
-async def _write_memory_async(session_id: str, messages: list, owner_id: str = ""):
-    """异步写入对话记忆（v2.2 per-user）"""
+async def _write_memory_async(
+    session_id: str,
+    messages: list,
+    owner_id: str = "",
+    _text_collector: list = None,
+):
+    """异步写入对话记忆 + 聊天消息（v2.3）"""
     try:
         memory_manager.write_from_conversation(session_id, messages, owner_id=owner_id)
         AGENT_MEMORY_WRITES.labels(status="success").inc()
     except Exception as e:
         AGENT_MEMORY_WRITES.labels(status="error").inc()
         logger.error(f"记忆写入失败: {e}")
+
+    # 同步保存聊天消息（含本次 assistant 回复）
+    if session_id and messages:
+        try:
+            all_messages = list(messages)
+            if _text_collector is not None:
+                assistant_text = "".join(_text_collector).strip()
+                if assistant_text:
+                    all_messages.append({"role": "assistant", "content": assistant_text})
+            memory_manager.store.replace_messages(session_id, owner_id, all_messages)
+            logger.info(f"[ChatMessages] session {session_id[:8]} 已保存 {len(all_messages)} 条消息")
+        except Exception as e:
+            logger.error(f"[ChatMessages] 保存失败: {e}")

@@ -10,6 +10,7 @@ import asyncio
 import json
 import time
 from typing import Callable, Any, Dict, Optional
+from openai import OpenAI
 
 from core.config import settings
 from core.logger import get_logger
@@ -64,28 +65,37 @@ class DiagnosisEngine:
 
     def __init__(self):
         self.self_healing_enabled = getattr(settings, 'AGENT_SELF_HEALING_ENABLED', True)
-        self._client = None
 
-    @property
-    def client(self):
-        if self._client is None:
-            from openai import OpenAI
-            self._client = OpenAI(
-                api_key=settings.ANALYST_API_KEY,
-                base_url=settings.ANALYST_BASE_URL
-            )
-        return self._client
+    def get_client(self, owner_id: str = ""):
+        """v2.2 P0.3：按 owner_id 读 per-user 配置"""
+        from core.config import get_agent_config_for_user, get_agent_config
+        if owner_id:
+            key, url, _ = get_agent_config_for_user(owner_id)
+        else:
+            key, url, _ = get_agent_config()
+        return OpenAI(api_key=key, base_url=url)
+
+    def _get_model(self, owner_id: str = "") -> str:
+        """v2.2 P0.3：取用户配置的模型名"""
+        from core.config import get_agent_config_for_user, get_agent_config
+        if owner_id:
+            _, _, model = get_agent_config_for_user(owner_id)
+        else:
+            _, _, model = get_agent_config()
+        return model or settings.DEFAULT_MODEL
 
     def diagnose(
         self,
         tool_name: str,
         error_message: str,
         error_type: str,
-        args: Dict
+        args: Dict,
+        owner_id: str = "",
     ) -> Dict[str, str]:
         """
         使用 LLM 分析错误类型并决定恢复策略。
         返回 {error_type, recovery_strategy, reasoning, suggested_action}
+        v2.2 P0.3：owner_id 透传
         """
         prompt = DIAGNOSIS_PROMPT.format(
             tool_name=tool_name,
@@ -95,8 +105,8 @@ class DiagnosisEngine:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
+            response = self.get_client(owner_id).chat.completions.create(
+                model=self._get_model(owner_id),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
@@ -121,7 +131,8 @@ class DiagnosisEngine:
         func: Callable,
         args: Dict,
         tool_name: str = "",
-        other_tools: Dict[str, Callable] = None
+        other_tools: Dict[str, Callable] = None,
+        owner_id: str = "",
     ) -> str:
         """
         执行函数，失败后走：熔断检查 → LLM 诊断 → 恢复策略。
@@ -164,7 +175,7 @@ class DiagnosisEngine:
             }, ensure_ascii=False)
 
         # ==================== LLM 诊断 ====================
-        diagnosis = self.diagnose(tool_name, first_error, first_error_type, args)
+        diagnosis = self.diagnose(tool_name, first_error, first_error_type, args, owner_id=owner_id)
         strategy = diagnosis.get("recovery_strategy", "no_retry")
 
         logger.info(f"[Diagnosis] 工具 {tool_name} 失败，诊断: {diagnosis}")

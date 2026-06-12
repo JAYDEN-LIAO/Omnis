@@ -15,25 +15,35 @@ class ReflectionEngine:
 
     def __init__(self):
         self.enabled = getattr(settings, 'AGENT_REFLECTION_ENABLED', True)
-        self._client = None
 
-    @property
-    def client(self):
-        if self._client is None:
-            self._client = OpenAI(
-                api_key=settings.ANALYST_API_KEY,
-                base_url=settings.ANALYST_BASE_URL
-            )
-        return self._client
+    def get_client(self, owner_id: str = ""):
+        """v2.2 P0.3：按 owner_id 读 per-user 配置，未传时回退全局默认"""
+        from core.config import get_agent_config_for_user, get_agent_config
+        if owner_id:
+            key, url, _ = get_agent_config_for_user(owner_id)
+        else:
+            key, url, _ = get_agent_config()
+        return OpenAI(api_key=key, base_url=url)
+
+    def _get_model(self, owner_id: str = "") -> str:
+        """v2.2 P0.3：取用户配置的模型名，空则用 settings.DEFAULT_MODEL"""
+        from core.config import get_agent_config_for_user, get_agent_config
+        if owner_id:
+            _, _, model = get_agent_config_for_user(owner_id)
+        else:
+            _, _, model = get_agent_config()
+        return model or settings.DEFAULT_MODEL
 
     def evaluate(
         self,
         user_question: str,
-        tool_result: str
+        tool_result: str,
+        owner_id: str = "",
     ) -> dict:
         """
         评估工具返回的置信度。
         返回 {confidence: "high"/"medi"/"low", reasoning, missing_info}
+        v2.2 P0.3：owner_id 透传，按用户配置选模型
         """
         if not self.enabled:
             return {"confidence": "high", "reasoning": "Reflection 已禁用", "missing_info": ""}
@@ -44,8 +54,8 @@ class ReflectionEngine:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
+            response = self.get_client(owner_id).chat.completions.create(
+                model=self._get_model(owner_id),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
@@ -68,11 +78,13 @@ class ReflectionEngine:
         self,
         user_question: str,
         tool_result: str,
-        missing_info: str
+        missing_info: str,
+        owner_id: str = "",
     ) -> dict:
         """
         置信度为 medi 时，生成补充探查 prompt。
         返回 {action: "follow_up"/"degrade", follow_up_question/degrade_answer}
+        v2.2 P0.3：owner_id 透传
         """
         prompt = REFLECTION_MEDI_PROMPT.format(
             user_question=user_question,
@@ -81,8 +93,8 @@ class ReflectionEngine:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
+            response = self.get_client(owner_id).chat.completions.create(
+                model=self._get_model(owner_id),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
