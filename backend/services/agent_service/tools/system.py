@@ -138,10 +138,13 @@ def get_system_overview_tool(_owner_id: str) -> str:
     from core.model_config_db import AGENT_ROLES, get_effective_config
     from core.subscription_db import count_subscriptions
     from services.radar_service.db_manager import get_all_push_configs
-    from services.radar_service.main import radar_status
+    from services.radar_service.main import get_radar_status
 
-    # 雷达
-    radar = radar_status.get_status_dict() if radar_status else {}
+    # 雷达（v2.2 per-user：与 get_system_status 保持一致）
+    try:
+        radar = get_radar_status(owner_id=_owner_id).get_status_dict()
+    except Exception:
+        radar = {}
 
     # 调度器（apscheduler 可选依赖；缺则置空）
     try:
