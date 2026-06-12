@@ -49,6 +49,15 @@ class AgentMemoryManager:
                 )
             parts.append("【用户高频关注实体】\n" + "\n".join(entity_lines))
 
+        # v2.2 P2.1：跨 session 长期关注实体（新 session 也能看到）
+        global_entities = self.store.get_global_entities(owner_id, min_count=3, limit=10)
+        if global_entities:
+            global_lines = [
+                f"- {e['entity']}（{e['entity_type']}），历史上累计查询 {e['total_count']} 次"
+                for e in global_entities
+            ]
+            parts.append("【用户长期关注（跨 session）】\n" + "\n".join(global_lines))
+
         # 检索事实记忆
         facts = self.store.get_valid_facts(session_id, owner_id)
         if facts:
@@ -90,7 +99,8 @@ class AgentMemoryManager:
         v2.2 P0#2：owner_id 透传到所有 store 写入路径，避免多用户数据串读。
         """
         summary = self._summarize_conversation(messages)
-        entities = self._extract_entities(summary)
+        # v2.2 P2.2：实体抽取从摘要改为原文（覆盖率大幅提升）
+        entities = self._extract_entities_from_messages(messages)
         self.store.save_summary(session_id, summary, entities, outcome, owner_id)
 
         # 4. 写入实体记忆（v2.2 P0#2：传 owner_id）
@@ -156,6 +166,7 @@ class AgentMemoryManager:
             "ns": "place",
             "nt": "org",
             "nz": "brand",
+            "n": "concept",  # v2.2 P2.2: 新增普通名词→概念
         }
         found: list = []
         seen: set = set()
@@ -174,29 +185,61 @@ class AgentMemoryManager:
 
         return found
 
+    def _extract_entities_from_messages(self, messages: List[Dict[str, str]]) -> List[tuple]:
+        """
+        v2.2 P2.2：从最后 4 条 user/assistant 原文中抽取实体（覆盖率高）。
+        摘要仅用于对话标题，实体抽取不再依赖摘要。
+        """
+        if not messages:
+            return []
+        try:
+            import jieba.posseg as pseg
+        except ImportError:
+            logger.warning("[Memory] jieba.posseg 不可用，跳过实体抽取")
+            return []
+
+        pos_map = {
+            "nr": "person", "ns": "place", "nt": "org",
+            "nz": "brand", "n": "concept",
+        }
+        # 取最后 4 条 user/assistant 原文
+        relevant = [m for m in messages if m.get("role") in ("user", "assistant")][-4:]
+        full_text = " ".join(m.get("content", "") for m in relevant)
+        if not full_text.strip():
+            return []
+
+        found: list = []
+        seen: set = set()
+        try:
+            for word, flag in pseg.cut(full_text):
+                if len(word) < 2:
+                    continue
+                if flag in pos_map:
+                    if word in seen:
+                        continue
+                    seen.add(word)
+                    found.append((word, pos_map[flag]))
+        except Exception as e:
+            logger.warning(f"[Memory] 实体抽取异常: {e}")
+            return []
+        return found
+
     def _analyze_and_write_patterns(
         self,
         session_id: str,
         messages: List[Dict[str, str]],
-        owner_id: str = ""
+        owner_id: str = "",
     ):
-        """分析并写入行为模式（v2.2 P0#2：传 owner_id）"""
-        user_messages = [m for m in messages if m.get("role") == "user"]
-        if not user_messages:
-            return
+        """
+        v2.2 P2.3：模式检测已精简（保留函数签名兼容调用方，不再写入无价值数据）。
+        后续若需要行为模式，改为从 entity_memory 的 query_count 派生即可。
+        """
+        # 精简后不再写入 pattern_memory；表结构保留以备未来扩展
+        return
 
-        # 简单模式识别
-        last_msg = user_messages[-1]["content"]
-        if len(last_msg) < 20:
-            self.store.upsert_pattern(session_id, "answer_length", "short", owner_id=owner_id)
-        elif len(last_msg) < 100:
-            self.store.upsert_pattern(session_id, "answer_length", "medium", owner_id=owner_id)
-        else:
-            self.store.upsert_pattern(session_id, "answer_length", "long", owner_id=owner_id)
-
-    def cleanup_expired_memory(self) -> int:
-        """包装 store 调用，返回清理条数（修复 #4.3）"""
-        return self.store.cleanup_expired_facts()
+    def cleanup_expired_memory(self) -> Dict[str, int]:
+        """v2.2 P2.5：全表 TTL 清理，返回各表清理条数"""
+        return self.store.cleanup_expired_all()
 
     def delete_session(self, session_id: str, owner_id: str = "") -> int:
         """删除某次对话记忆（v2.2 P0#2：传 owner_id 限定删除范围）"""

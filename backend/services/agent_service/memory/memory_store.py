@@ -82,12 +82,59 @@ class AgentMemoryStore:
                 )
             """)
 
+            # chat_messages: 聊天消息持久化表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    owner_id TEXT DEFAULT '',
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    msg_index INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             # v2.2：为存量表添加 owner_id（幂等迁移）
-            for tbl in ("conversation_summary", "entity_memory", "fact_memory", "pattern_memory"):
+            for tbl in ("conversation_summary", "entity_memory", "fact_memory", "pattern_memory", "chat_messages"):
                 try:
                     cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id TEXT DEFAULT ''")
                 except Exception:
                     pass
+
+            # v2.2 P2.5：WAL 模式 + busy_timeout（提升并发读写）
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+
+            # v2.2 P2.5：7 个复合索引（覆盖所有常用查询路径）
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_entity_owner_session_count
+                ON entity_memory(owner_id, session_id, query_count DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_entity_owner_query_time
+                ON entity_memory(owner_id, last_query_time DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_fact_owner_session_expiry
+                ON fact_memory(owner_id, session_id, expires_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_pattern_owner_session_updated
+                ON pattern_memory(owner_id, session_id, updated_at DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_summary_owner_created
+                ON conversation_summary(owner_id, created_at DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_session_owner_index
+                ON chat_messages(session_id, owner_id, msg_index)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_owner_created
+                ON chat_messages(owner_id, created_at DESC)
+            """)
 
             conn.commit()
         logger.info(f"[MemoryStore] 数据库初始化完成: {self.db_path}")
@@ -162,6 +209,31 @@ class AgentMemoryStore:
                     WHERE session_id=? AND owner_id=? AND query_count>=?
                     ORDER BY query_count DESC
                 """, (session_id, owner_id, min_count))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_global_entities(
+        self,
+        owner_id: str,
+        min_count: int = 3,
+        limit: int = 20,
+    ) -> List[Dict]:
+        """
+        跨 session 聚合 owner 的高频实体（v2.2 P2.1）。
+        用于新 session 启动时，注入"用户长期关注"到工作记忆。
+        """
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT entity, entity_type, SUM(query_count) AS total_count,
+                       MAX(last_query_time) AS last_seen
+                FROM entity_memory
+                WHERE owner_id = ?
+                GROUP BY entity, entity_type
+                HAVING total_count >= ?
+                ORDER BY total_count DESC
+                LIMIT ?
+            """, (owner_id, min_count, limit))
             return [dict(row) for row in cursor.fetchall()]
 
     # ==================== fact_memory ====================
@@ -333,6 +405,52 @@ class AgentMemoryStore:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    # ==================== chat_messages ====================
+
+    def replace_messages(self, session_id: str, owner_id: str, messages: List[Dict[str, str]]):
+        """
+        覆盖写入 chat_messages（v2.2 P2.5：记录数一致时跳过 DELETE+INSERT，直接 UPDATE 顺序）。
+        """
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, msg_index FROM chat_messages WHERE session_id=? AND owner_id=? ORDER BY msg_index",
+                (session_id, owner_id),
+            )
+            existing = cursor.fetchall()
+            now = datetime.now().isoformat()
+
+            if len(existing) == len(messages):
+                # 数量一致：原地 UPDATE（按 msg_index 对位）
+                for (row_id, _), msg in zip(existing, messages):
+                    cursor.execute(
+                        "UPDATE chat_messages SET role=?, content=? WHERE id=?",
+                        (msg["role"], msg.get("content", ""), row_id),
+                    )
+            else:
+                # 数量不一致：先 DELETE 再 INSERT
+                cursor.execute(
+                    "DELETE FROM chat_messages WHERE session_id=? AND owner_id=?",
+                    (session_id, owner_id),
+                )
+                for i, msg in enumerate(messages):
+                    cursor.execute(
+                        "INSERT INTO chat_messages (session_id, owner_id, role, content, msg_index, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (session_id, owner_id, msg["role"], msg.get("content", ""), i, now),
+                    )
+            conn.commit()
+
+    def get_messages(self, session_id: str, owner_id: str) -> List[Dict]:
+        """获取指定 session 的聊天消息，按 msg_index 正序返回"""
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT role, content, created_at FROM chat_messages WHERE session_id=? AND owner_id=? ORDER BY msg_index ASC",
+                (session_id, owner_id),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
     # ==================== 清理 ====================
 
     def cleanup_expired_facts(self) -> int:
@@ -348,6 +466,58 @@ class AgentMemoryStore:
         if deleted:
             logger.info(f"[MemoryStore] 清理过期 fact_memory: {deleted} 条")
         return deleted
+
+    def cleanup_expired_all(self) -> Dict[str, int]:
+        """
+        v2.2 P2.5：全表 TTL 清理。
+        - fact_memory: 90 天（已有 expires_at 字段）
+        - entity_memory: 1 年（按 last_query_time 删）
+        - pattern_memory: 半年（按 updated_at 删）
+        - chat_messages: 90 天（按 created_at 删）
+        - conversation_summary: 90 天（按 created_at 删）
+        """
+        from datetime import datetime, timedelta
+        now = datetime.now().isoformat()
+        stats = {}
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+
+            # fact_memory: 已有 expires_at 字段，直接用
+            cursor.execute("DELETE FROM fact_memory WHERE expires_at < ?", (now,))
+            stats["fact_memory"] = cursor.rowcount
+
+            # entity_memory: 1 年无查询则清理
+            cutoff_1y = (datetime.now() - timedelta(days=365)).isoformat()
+            cursor.execute(
+                "DELETE FROM entity_memory WHERE last_query_time < ?", (cutoff_1y,)
+            )
+            stats["entity_memory"] = cursor.rowcount
+
+            # pattern_memory: 半年
+            cutoff_half = (datetime.now() - timedelta(days=180)).isoformat()
+            cursor.execute(
+                "DELETE FROM pattern_memory WHERE updated_at < ?", (cutoff_half,)
+            )
+            stats["pattern_memory"] = cursor.rowcount
+
+            # chat_messages: 90 天
+            cutoff_90 = (datetime.now() - timedelta(days=90)).isoformat()
+            cursor.execute(
+                "DELETE FROM chat_messages WHERE created_at < ?", (cutoff_90,)
+            )
+            stats["chat_messages"] = cursor.rowcount
+
+            # conversation_summary: 90 天
+            cursor.execute(
+                "DELETE FROM conversation_summary WHERE created_at < ?", (cutoff_90,)
+            )
+            stats["conversation_summary"] = cursor.rowcount
+
+            conn.commit()
+        total = sum(stats.values())
+        if total:
+            logger.info(f"[MemoryStore] TTL 清理: {stats}")
+        return stats
 
     def delete_session(
         self,
@@ -366,7 +536,7 @@ class AgentMemoryStore:
         deleted_total = 0
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary"]:
+            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary", "chat_messages"]:
                 if include_legacy:
                     cursor.execute(
                         f"DELETE FROM {table} WHERE session_id=? AND (owner_id=? OR owner_id='')",
@@ -386,7 +556,7 @@ class AgentMemoryStore:
         with self._get_conn() as conn:
             cursor = conn.cursor()
             stats = {}
-            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary"]:
+            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary", "chat_messages"]:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[table] = cursor.fetchone()[0]
             return stats
