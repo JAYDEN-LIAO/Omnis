@@ -32,24 +32,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (checking) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-background">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/60" />
+      <div className="flex h-screen w-full items-center justify-center" style={{ background: 'var(--bg-outer)' }}>
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--border-faint)] border-t-[var(--primary-gold)]" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-screen w-full overflow-hidden" style={{ background: 'var(--bg-outer)' }}>
       {/* Admin 侧边栏 */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-border/50 bg-muted/20">
-        <div className="flex h-14 items-center border-b border-border/50 px-4">
+      <aside className="flex w-60 shrink-0 flex-col border-r" style={{ borderColor: 'var(--border-refined)', background: 'var(--surface-card)' }}>
+        <div className="flex h-14 items-center border-b px-4" style={{ borderColor: 'var(--border-refined)' }}>
           <div className="flex items-center gap-2">
-            <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
+            <div className="grid h-7 w-7 place-items-center rounded-md brushed-gold" style={{ color: 'white' }}>
               <ShieldCheck className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold tracking-tight">Admin Console</div>
-              <div className="text-[10px] text-muted-foreground/60">MediaRadar v2.2</div>
+              <div className="text-sm font-semibold tracking-tight" style={{ color: 'var(--on-surface)' }}>管理控制台</div>
+              <div className="text-[10px] opacity-50" style={{ color: 'var(--on-surface-variant)' }}>Omnis v2.2</div>
             </div>
           </div>
         </div>
@@ -64,10 +64,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Link key={item.href} href={item.href}
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
-                  active
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}>
+                )}
+                style={{
+                  background: active ? 'var(--primary-gold-soft)' : 'transparent',
+                  color: active ? 'var(--primary-gold)' : 'var(--on-surface-variant)',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
                 <Icon className="h-4 w-4" />
                 {item.label}
               </Link>
@@ -75,7 +79,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        <div className="border-t border-border/50 p-3">
+        <div className="border-t p-3" style={{ borderColor: 'var(--border-refined)' }}>
           <Button asChild variant="outline" size="sm" className="w-full justify-start">
             <Link href="/dashboard">
               <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />

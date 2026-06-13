@@ -64,6 +64,7 @@ export function middleware(request: NextRequest) {
   if (
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/agent') ||
+    pathname.startsWith('/list') ||
     pathname.startsWith('/yq-list') ||
     pathname.startsWith('/settings')
   ) {

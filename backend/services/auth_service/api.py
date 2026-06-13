@@ -19,6 +19,7 @@ from core.auth_db import (
     get_user_by_id,
     list_users,
     update_user_role,
+    update_user_profile,
     deactivate_user,
     create_user,
     create_local_user,
@@ -73,6 +74,10 @@ class ChangePasswordRequest(BaseModel):
 # v2.2 P1#14：refresh token 请求体
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    nickname: str = ""
 
 
 class SetPasswordRequest(BaseModel):
@@ -146,6 +151,20 @@ async def set_password_endpoint(
     if not ok:
         raise HTTPException(status_code=400, detail={"code": 400, "msg": "用户已存在本地密码，请使用 change-password", "data": None})
     return {"code": 200, "msg": "密码已设置", "data": None}
+
+
+@router.put("/api/auth/profile")
+async def update_profile(
+    req: ProfileUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """更新当前用户资料（昵称）。"""
+    if not req.nickname or not req.nickname.strip():
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": "昵称不能为空", "data": None})
+    ok = update_user_profile(current_user["id"], req.nickname.strip())
+    if not ok:
+        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
+    return {"code": 200, "msg": "资料已更新", "data": None}
 
 
 # ==================== 邮箱密码注册/登录 ====================

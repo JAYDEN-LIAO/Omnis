@@ -3,44 +3,43 @@
 import { motion } from 'framer-motion';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Radar, Bell, Cpu, User } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 const tabs = [
-  { title: '监控设置', href: '/settings/system', icon: Radar },
-  { title: '推送设置', href: '/settings/push', icon: Bell },
-  { title: '模型设置', href: '/settings/llm', icon: Cpu },
-  { title: '账号设置', href: '/settings/account', icon: User },
+  { title: '系统', href: '/settings/system' },
+  { title: '推送', href: '/settings/push' },
+  { title: '模型', href: '/settings/llm' },
+  { title: '账号', href: '/settings/account' },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="space-y-6">
-      {/* 水平标签栏 */}
-      <div className="flex gap-1 border-b border-border/60">
+    <div>
+      {/* Underline-style sub-nav tabs */}
+      <nav className="flex items-center gap-10 border-b border-[color:var(--border-faint)] mb-8">
         {tabs.map((tab) => {
           const active = pathname === tab.href;
           return (
             <Link
               key={tab.href}
               href={tab.href}
-              className={cn(
-                'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors',
+              className={`label-caps text-[11px] pb-4 relative transition-colors ${
                 active
-                  ? 'border-foreground text-foreground'
-                  : 'border-transparent text-muted-foreground/60 hover:text-foreground hover:border-muted-foreground/20',
-              )}
+                  ? 'text-[color:var(--primary-gold)]'
+                  : 'text-[color:var(--on-surface-variant)] hover:text-[color:var(--primary-gold)]'
+              }`}
             >
-              <tab.icon className="h-4 w-4" />
               {tab.title}
+              {active && (
+                <div className="absolute inset-x-0 bottom-0 h-[2px] bg-[color:var(--primary-gold)]" />
+              )}
             </Link>
           );
         })}
-      </div>
+      </nav>
 
-      {/* 内容区 — 全宽 */}
+      {/* Content */}
       <motion.div
         key={pathname}
         initial={{ opacity: 0 }}

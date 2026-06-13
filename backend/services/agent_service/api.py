@@ -117,7 +117,6 @@ async def get_session_memory(
         summary = memory_manager.store.get_summary(session_id, owner_id=owner_id)
         entities = memory_manager.store.get_frequent_entities(session_id, owner_id, min_count=1)
         facts = memory_manager.store.get_valid_facts(session_id, owner_id)
-        patterns = memory_manager.store.get_recent_patterns(session_id, owner_id, days=7)
 
         return {
             "success": True,
@@ -125,7 +124,6 @@ async def get_session_memory(
                 "summary": summary,
                 "entities": entities,
                 "facts": facts,
-                "patterns": patterns,
             },
         }
     except Exception as e:

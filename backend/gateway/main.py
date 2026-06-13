@@ -5,6 +5,12 @@ import asyncio as _asyncio_init
 import sys as _sys_init
 if _sys_init.platform == "win32":
     _asyncio_init.set_event_loop_policy(_asyncio_init.WindowsProactorEventLoopPolicy())
+    # 强制 stdout 行缓冲，确保 uvicorn reload 子进程日志实时显示在终端
+    try:
+        _sys_init.stdout.reconfigure(line_buffering=True)
+        _sys_init.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request

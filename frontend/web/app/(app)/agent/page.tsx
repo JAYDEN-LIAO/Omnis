@@ -1,64 +1,139 @@
 'use client';
 
-/**
- * Agent 页面 —— 接入 P2 SSE 多事件协议。
- *
- * 布局：
- *   [会话列表 260] [Chat 主区 1fr] [右侧看板 280]
- *
- * 流式：useAgentStream + MessageStream 渲染 text / tool_call / tool_result 卡片。
- */
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Send, User as UserIcon, Plus, MessageSquare, X } from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
-import { agentApi, type AgentSession } from '@/lib/api';
 import { useAgentStream } from '@/components/chat/useAgentStream';
 import { MessageStream } from '@/components/chat/MessageStream';
 import { RightDashboard } from '@/components/chat/RightDashboard';
-import { LoginBrief } from '@/components/chat/LoginBrief';
+import { authApi, agentApi, type AgentSession } from '@/lib/api';
 import type { AssistantMessage } from '@/components/chat/sse-types';
 
 type UIMessage =
   | { kind: 'user'; content: string }
   | { kind: 'assistant'; data: AssistantMessage };
 
-const SUGGESTIONS = [
-  '展示我的订阅清单',
-  '帮我分析最近 24 小时品牌口碑趋势',
-  '看看今天的高危话题',
-  '触发一次后台全网扫描',
+const GREETINGS = [
+  // Omnis 身份核心
+  'Omnis 已就绪', '我是 Omnis', 'Omnis 随时待命',
+  'Omnis 为你服务', '你的 AI 管家 Omnis', 'Omnis 已上线',
+  'Omnis 待命中', '欢迎使用 Omnis', 'Omnis 在此',
+  // 英文问候
+  'Greetings', 'Hello', 'Hey',
+  "What's on your mind", 'Welcome back',
+  'Good to see you', 'Ready when you are',
+  'How can I help', 'Glad you\'re here',
+  // 混合风格
+  'Omnis at your service', 'Hi there',
+  'Long time no see', 'What can Omnis do for you',
 ];
 
-const WELCOME: AssistantMessage = {
-  role: 'assistant',
-  text: '你好！我是 MediaRadar 智能助手。可以帮你管理订阅、查询舆情、调度爬虫、检查推送通道。直接说出你的需求即可。',
-  toolCalls: [],
-  cards: [],
-  done: true,
-};
+const SUB_TITLES = [
+  // 系统正常运行
+  '系统运行正常，全网舆情数据持续更新中。有什么需要关注的？',
+  'Omnis 正在监控各大平台，随时为你报告最新动态。',
+  '所有通道就绪，舆情数据实时入库。今天想分析什么？',
+  '雷达平稳运行，信息流持续汇聚。需要深入了解什么？',
+  'Omnis 全链路正常，覆盖微博、抖音、知乎、B站等平台。',
+  '监控系统在线，数据持续更新。有什么需要调查的？',
+  '扫描引擎待命中，数据仓库已就绪。请告诉我你的关注方向。',
+  '多平台数据正在同步，舆情态势实时更新。有什么想了解的？',
+  'Omnis 已连接所有数据源，随时可以启动深度分析。',
+  '系统健康运行中，历史数据可供回溯分析。需要查什么？',
+  '全网监控已启动，最新资讯持续入库。你的关注点是什么？',
+  '舆情雷达正常运转，24小时不间断监测中。',
+  '信息采集系统运行中，已覆盖主要社交媒体平台。',
+  '数据流水线畅通，分析引擎就绪。今天重点关注什么？',
+  // 扫描进行中变体
+  '雷达正在进行全网扫描，最新数据正在汇聚。',
+  '正在执行扫描任务，数据更新中，请稍候。',
+  '扫描任务进行中，最新舆情数据即将入库。',
+  '数据采集器正在工作，多平台信息同步中。',
+];
+
+const WELCOME_PILLS = [
+  { icon: 'travel_explore', label: '全网舆情分析', prompt: '分析当前全网舆情态势，包括情感趋势、热门话题和风险概览' },
+  { icon: 'bookmark_manager', label: '订阅管理中心', prompt: '查看和管理我的监控订阅，包括关键词、人物、事件和竞品订阅' },
+  { icon: 'notifications_active', label: '风险监控预警', prompt: '查看当前的舆情风险预警列表和高风险话题' },
+  { icon: 'schedule', label: '定时扫描配置', prompt: '查看和配置自动扫描的频率和时间设置' },
+  { icon: 'hub', label: '推送通道设置', prompt: '查看和配置企业微信、飞书、邮箱等推送通道' },
+  { icon: 'monitoring', label: '系统运行状态', prompt: '查看 Omnis 系统运行状态、调度器和各模块健康情况' },
+];
 
 export default function AgentPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [history, setHistory] = useState<UIMessage[]>([
-    { kind: 'assistant', data: WELCOME },
-  ]);
+  const [history, setHistory] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
+  const [pendingSessions, setPendingSessions] = useState<AgentSession[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
+  const [subtitle] = useState(() => SUB_TITLES[Math.floor(Math.random() * SUB_TITLES.length)]);
 
-  const { assistant, isStreaming, error, send, cancel } = useAgentStream();
+  const { assistant, isStreaming, error, send, cancel, reset } = useAgentStream();
 
-  const sessionsQuery = useQuery({
-    queryKey: ['agent-sessions'],
-    queryFn: () => agentApi.memory(),
+  const { data: user } = useQuery({
+    queryKey: ['current-user'],
+    queryFn: () => authApi.me(),
   });
 
-  // 滚动到底部
+  const { data: sessionsData, refetch: refetchSessions } = useQuery({
+    queryKey: ['agent-sessions'],
+    queryFn: () => agentApi.memory(),
+    refetchInterval: 15_000,
+  });
+
+  const backendSessions = sessionsData?.data?.sessions ?? [];
+
+  const allSessions = useMemo(() => {
+    const pending = pendingSessions.filter(
+      (p) => !backendSessions.some((b: AgentSession) => b.session_id === p.session_id),
+    );
+    return [...pending, ...backendSessions];
+  }, [backendSessions, pendingSessions]);
+
+  const handleSelectSession = async (sid: string) => {
+    reset();
+    setSessionId(sid);
+    setHistory([]);
+
+    // 加载该 session 的历史聊天消息
+    try {
+      const res = await agentApi.messages(sid);
+      const msgs = res?.data?.messages;
+      if (msgs && msgs.length > 0) {
+        const restored: UIMessage[] = msgs.map((m) =>
+          m.role === 'user'
+            ? { kind: 'user' as const, content: m.content }
+            : {
+                kind: 'assistant' as const,
+                data: {
+                  role: 'assistant',
+                  text: m.content,
+                  toolCalls: [],
+                  cards: [],
+                  done: true,
+                },
+              },
+        );
+        setHistory(restored);
+      }
+    } catch {
+      // 静默失败，用户看到的是空对话
+    }
+  };
+
+  const handleDeleteSession = async (sid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('确定删除该对话？')) return;
+    try {
+      const res = await agentApi.deleteSession(sid);
+      if (res.success) {
+        refetchSessions();
+        if (sessionId === sid) { reset(); setSessionId(null); setHistory([]); }
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -66,23 +141,14 @@ export default function AgentPage() {
     });
   }, [history, assistant?.text, assistant?.toolCalls.length, assistant?.cards.length]);
 
-  // 当 assistant 进入 done 状态，把它持久化进 history
   useEffect(() => {
     if (assistant?.done && !isStreaming) {
       setHistory((h) => {
-        // 防止重复 push（StrictMode 双调用兜底）
         const last = h[h.length - 1];
-        if (
-          last &&
-          last.kind === 'assistant' &&
-          last.data === assistant
-        ) {
-          return h;
-        }
+        if (last && last.kind === 'assistant' && last.data === assistant) return h;
         return [...h, { kind: 'assistant', data: assistant }];
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistant?.done, isStreaming]);
 
   const sendMessage = async (text: string) => {
@@ -92,7 +158,6 @@ export default function AgentPage() {
     setHistory((h) => [...h, { kind: 'user', content: trimmed }]);
     setInput('');
 
-    // 把 history 拍平成 openai 风格 messages
     const flatMessages = [
       ...history.flatMap<{ role: 'user' | 'assistant'; content: string }>((m) =>
         m.kind === 'user'
@@ -104,183 +169,206 @@ export default function AgentPage() {
       { role: 'user' as const, content: trimmed },
     ];
 
-    await send(flatMessages, { sessionId });
+    await send(flatMessages, {
+      sessionId,
+      onSessionId: (sid) => setSessionId(sid),
+    });
   };
 
   const startNewSession = () => {
-    cancel();
-    setSessionId(null);
-    setHistory([{ kind: 'assistant', data: WELCOME }]);
+    // 当前已是空对话则不重复创建空白 session
+    if (history.length === 0 && sessionId) return;
+    reset();
+    const newId = crypto.randomUUID();
+    setSessionId(newId);
+    setHistory([]);
+    setPendingSessions((prev) => {
+      if (prev.some((s) => s.session_id === newId)) return prev;
+      return [{ session_id: newId, title: '新对话' }, ...prev];
+    });
   };
 
-  const showSuggestions = useMemo(
-    () => history.length === 1 && !isStreaming && !assistant,
-    [history.length, isStreaming, assistant],
-  );
-
   return (
-    <div className="grid h-[calc(100vh-160px)] grid-cols-1 gap-3 lg:grid-cols-[240px_1fr_280px]">
-      {/* —— 左：会话列表 —— */}
-      <Card className="hidden flex-col overflow-hidden lg:flex">
-        <div className="flex items-center justify-between border-b border-border p-3">
-          <span className="text-sm font-semibold">会话</span>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
+    <div className="h-[calc(100vh-64px)] -m-6 md:-m-8 relative overflow-hidden flex">
+      {/* Chat list panel */}
+      <div className="w-[220px] shrink-0 flex flex-col pt-3">
+        {/* New Chat button */}
+        <div className="px-3 mb-2">
+          <button
             onClick={startNewSession}
-            title="新建会话"
+            className="flex items-center gap-1.5 text-xs transition-all hover:opacity-70"
+            style={{ color: 'var(--on-surface-variant)' }}
           >
-            <Plus className="h-4 w-4" />
-          </Button>
+            <span className="material-symbols-outlined text-base">add</span>
+            <span className="label-caps text-[10px] tracking-wider font-medium">新对话</span>
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {sessionsQuery.isLoading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="mb-2 h-12 w-full" />
-            ))
-          ) : (() => {
-            const sessions = sessionsQuery.data?.sessions;
-            if (Array.isArray(sessions) && sessions.length > 0) {
-              return sessions.map((s: AgentSession) => (
-                <button
-                  key={s.session_id}
-                  onClick={() => setSessionId(s.session_id)}
-                  className={cn(
-                    'mb-1 flex w-full items-center gap-2 rounded-lg p-2 text-left text-sm transition-colors hover:bg-accent',
-                    sessionId === s.session_id && 'bg-primary/10 text-primary',
-                  )}
-                >
-                  <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-xs">{s.title}</span>
-                </button>
-              ));
-            }
-            return (
-              <p className="p-3 text-center text-xs text-muted-foreground">
-                暂无历史会话
-              </p>
-            );
-          })()}
-        </div>
-      </Card>
 
-      {/* —— 中：聊天主区 —— */}
-      <Card className="flex flex-col overflow-hidden">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-6">
-          {/* 历史消息 */}
-          <AnimatePresence initial={false}>
+        {/* Session list */}
+        <div className="flex-1 overflow-y-auto px-3 space-y-0.5 scrollbar-hide">
+          {allSessions.length > 0 ? (
+            allSessions.map((s) => (
+              <div key={s.session_id} className="group flex items-center">
+                <button
+                  onClick={() => handleSelectSession(s.session_id)}
+                  className="flex-1 text-left py-1.5 transition-all text-xs truncate"
+                  style={{
+                    color: sessionId === s.session_id ? 'var(--primary-gold)' : 'var(--on-surface-faint)',
+                  }}
+                >
+                  {s.title || '新对话'}
+                </button>
+                <button
+                  onClick={(e) => handleDeleteSession(s.session_id, e)}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/5"
+                  style={{ color: 'var(--on-surface-faint)' }}
+                  title="删除对话"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="py-6 text-center text-xs" style={{ color: 'var(--on-surface-faint)' }}>
+              暂无历史对话
+            </div>
+          )}
+        </div>
+
+        {/* Bottom count */}
+        <div className="px-3 py-2">
+          <span className="text-[9px] label-caps" style={{ color: 'var(--on-surface-faint)' }}>
+            {allSessions.length} 个对话
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col min-w-0 mr-[316px]">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 space-y-12 pb-32">
+          {/* Welcome greeting — 始终在顶部，副标题+功能按钮永久显示 */}
+          <section className="max-w-3xl mx-auto pt-12">
+            <h3 className="serif-headline text-4xl lg:text-5xl text-[color:var(--on-surface)] mb-6 opacity-95">
+              {greeting}, {user?.nickname || 'Analyst'}.
+            </h3>
+            <p className="text-lg text-[color:var(--on-surface-variant)] mb-8 max-w-xl">
+              {subtitle}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {WELCOME_PILLS.map((pill) => (
+                <button
+                  key={pill.label}
+                  type="button"
+                  onClick={() => { setInput(pill.prompt); inputRef.current?.focus(); }}
+                  className="px-4 py-2 rounded-full caustic-card text-sm text-[color:var(--on-surface-variant)] hover:text-[color:var(--primary-gold)] hover:border-[color:var(--primary-gold)]/30 transition-all flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-base">{pill.icon}</span>
+                  {pill.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Chat messages — 追加在 welcome 下方 */}
+          <div className="max-w-3xl mx-auto space-y-10">
             {history.map((m, i) => {
               if (m.kind === 'user') {
                 return (
-                  <motion.div
-                    key={`u-${i}`}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-4 flex justify-end gap-3"
-                  >
-                    <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
-                      {m.content}
+                  <div key={`u-${i}`} className="flex flex-col items-end">
+                    <div className="flex items-center gap-3 mb-2 opacity-50 flex-row-reverse">
+                      <span className="text-[10px] label-caps tracking-tighter" style={{ color: 'var(--on-surface-variant)' }}>{user?.nickname || 'User'}</span>
+                      <div className="h-[0.5px] flex-1 bg-gradient-to-l from-on-surface-faint/20 to-transparent" />
                     </div>
-                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted">
-                      <UserIcon className="h-4 w-4" />
-                    </div>
-                  </motion.div>
+                    <p className="text-sm text-right leading-relaxed" style={{ color: 'var(--on-surface-variant)' }}>{m.content}</p>
+                  </div>
                 );
               }
               return (
-                <MessageStream
-                  key={`a-${i}`}
-                  message={m.data}
-                  streaming={false}
-                />
+                <div key={`a-${i}`} className="space-y-6">
+                  <div className="flex items-center gap-3 opacity-80">
+                    <span className="text-[10px] label-caps tracking-tighter" style={{ color: 'var(--primary-gold)' }}>Omnis</span>
+                    <div className="h-[0.5px] flex-1 bg-gradient-to-r from-primary/30 to-transparent" />
+                  </div>
+                  <MessageStream message={m.data} streaming={false} onAction={(text) => { setInput(text); inputRef.current?.focus(); }} />
+                </div>
               );
             })}
-          </AnimatePresence>
 
-          {/* 当前流式 assistant —— done 后会进 history，未 done 时这里展示 */}
-          {assistant && !assistant.done && (
-            <MessageStream message={assistant} streaming={true} />
-          )}
-
-          {/* 全局错误 */}
-          {error && (
-            <div className="my-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
-              {error}
-            </div>
-          )}
-
-          {/* 快捷提问 + 登录简报 */}
-          {showSuggestions && (
-            <div className="flex flex-col items-center">
-              {/* 数据简报 */}
-              <div className="w-full max-w-lg">
-                <LoginBrief onAction={sendMessage} />
-              </div>
-              {/* 快捷按钮 */}
-              <div className="mt-6 w-full max-w-lg text-center">
-                <p className="mb-3 text-sm text-muted-foreground/60">
-                  快速提问
-                </p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <Button
-                      key={s}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => sendMessage(s)}
-                      className="text-xs"
-                    >
-                      {s}
-                    </Button>
-                  ))}
+            {/* Current streaming assistant */}
+            {assistant && !assistant.done && (
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 opacity-80">
+                  <span className="text-[10px] label-caps tracking-tighter" style={{ color: 'var(--primary-gold)' }}>Omnis</span>
+                  <div className="h-[0.5px] flex-1 bg-gradient-to-r from-primary/30 to-transparent" />
                 </div>
+                <MessageStream message={assistant} streaming={true} />
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* 输入框 */}
-        <div className="border-t border-border bg-background/40 p-4 backdrop-blur">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage(input);
-            }}
-            className="flex items-center gap-2"
-          >
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                isStreaming ? 'AI 正在回复…' : '向 AI 助手提问…'
-              }
-              disabled={isStreaming}
-              className="flex-1"
-            />
-            {isStreaming ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                onClick={cancel}
-                title="中止"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button type="submit" size="icon" disabled={!input.trim()}>
-                <Send className="h-4 w-4" />
-              </Button>
             )}
-          </form>
-        </div>
-      </Card>
 
-      {/* —— 右：看板 —— */}
-      <div className="hidden lg:block">
-        <RightDashboard onQuickAction={sendMessage} />
+            {/* Error */}
+            {error && (
+              <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: 'rgba(220, 38, 38, 0.08)', color: '#dc2626' }}>
+                <span className="material-symbols-outlined text-sm shrink-0 mt-0.5">warning</span>
+                <span>{error}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Input bar — capsule at bottom center */}
+        <div className="shrink-0 px-8 pb-6 pt-2">
+          <div className="max-w-3xl mx-auto">
+            <form
+              onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
+              className="glass-slab rounded-[2rem] p-2 flex items-center gap-3"
+            >
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage(input);
+                  }
+                }}
+                placeholder="向 Omnis 提问：舆情分析、风险查询、全网搜索..."
+                rows={1}
+                className="flex-1 bg-transparent border-none outline-none text-sm resize-none py-2 scrollbar-hide max-h-32 ml-2"
+                style={{ color: 'var(--on-surface)' }}
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  el.style.height = 'auto';
+                  el.style.height = `${el.scrollHeight}px`;
+                }}
+              />
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={cancel}
+                  className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                  style={{ background: 'rgba(0,0,0,0.05)', color: 'var(--on-surface-variant)' }}
+                >
+                  <span className="material-symbols-outlined text-xl">close</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="w-10 h-10 rounded-full brushed-gold flex items-center justify-center shrink-0 disabled:opacity-40"
+                  style={{ color: 'oklch(0.2 0.05 85)' }}
+                >
+                  <span className="material-symbols-outlined text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
+                </button>
+              )}
+            </form>
+          </div>
+        </div>
       </div>
+
+      {/* Fixed right panel — Intelligence Live */}
+      <aside className="fixed right-4 top-20 bottom-4 w-[300px] rounded-xl glass-slab flex flex-col z-40 overflow-hidden">
+        <RightDashboard onQuickAction={sendMessage} />
+      </aside>
     </div>
   );
 }

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 
+import os
 import sys
 from enum import Enum
 from types import SimpleNamespace
@@ -323,6 +324,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.ENABLE_GET_SUB_COMMENTS = enable_sub_comment
         config.HEADLESS = enable_headless
         config.CDP_HEADLESS = enable_headless
+        # 允许 crawler_adapter 通过环境变量强制关闭 CDP 模式（headless 下 Edge CDP 启动超时）
+        if os.environ.get("MEDIARADAR_SKIP_CDP", "").lower() in ("true", "1", "yes"):
+            config.ENABLE_CDP_MODE = False
         config.SAVE_DATA_OPTION = save_data_option.value
         config.COOKIES = cookies
         config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = max_comments_count_singlenotes

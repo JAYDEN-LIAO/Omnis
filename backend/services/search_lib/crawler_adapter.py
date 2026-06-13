@@ -136,17 +136,37 @@ async def quick_crawl_stream(
             "--platform", plat,
             "--type", "search",
             "--save_data_option", "sqlite",
-            "--headless", "no",
+            "--headless", "true",
             "--keywords", query,
         ]
 
-        # Popen + 轮询：不阻塞事件循环，发送进度事件
+        # Popen + 轮询：不阻塞事件循环，定期 yield 心跳保持 SSE 活跃
+        # headless 模式下跳过 CDP（Edge headless 启动调试端口超时），用标准模式直接爬
+        _env = os.environ.copy()
+        _env["MEDIARADAR_SKIP_CDP"] = "true"
         proc = subprocess.Popen(cmd, cwd=CRAWLER_DIR,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                stdout=None, stderr=subprocess.PIPE, env=_env)
         deadline = loop.time() + 300
+        heartbeat_interval = 5   # 每 5 秒发一次心跳
+        db_poll_interval = 3     # 每 3 秒查一次 DB 获取新帖子
+        last_heartbeat = loop.time()
+        last_db_poll = loop.time()
+        seen_ids: set = set()    # 已 yield 的帖子 ID，避免重复
         try:
             while proc.poll() is None:
                 await asyncio.sleep(1)
+                # 定期 yield 心跳，让上层 SSE 能刷新到前端
+                if loop.time() - last_heartbeat >= heartbeat_interval:
+                    yield {"type": "heartbeat", "platform": plat, "elapsed": int(loop.time() - (deadline - 300))}
+                    last_heartbeat = loop.time()
+                # 定期查 DB，有新帖子立即 yield（不等爬虫跑完）
+                if loop.time() - last_db_poll >= db_poll_interval:
+                    new_posts = _read_latest_posts(plat, query, max_count=max_per_platform)
+                    for post in new_posts:
+                        if post["post_id"] not in seen_ids:
+                            seen_ids.add(post["post_id"])
+                            yield {"type": "item", "item": post}
+                    last_db_poll = loop.time()
                 if loop.time() > deadline:
                     proc.kill()
                     logger.warning(f"[CrawlerAdapter] {plat} 爬虫超时")
@@ -162,12 +182,20 @@ async def quick_crawl_stream(
             except: proc.kill()
 
         if proc.returncode is None or proc.returncode != 0:
+            # 读取 stderr 日志，帮助排查爬虫崩溃原因
+            try:
+                _stderr = proc.stderr.read().decode("utf-8", errors="replace")[:500] if proc.stderr else ""
+                if _stderr.strip():
+                    logger.warning(f"[CrawlerAdapter] {plat} 爬虫 stderr:\n{_stderr}")
+            except Exception:
+                pass
             continue
 
-        # 读取结果
+        # 爬虫跑完后，再查一次遗漏的帖子
         posts = _read_latest_posts(plat, query, max_count=max_per_platform)
+        remaining = [p for p in posts if p["post_id"] not in seen_ids]
         yield {"type": "progress", "platform": plat, "scanned": len(posts)}
-        for post in posts:
+        for post in remaining:
             yield {"type": "item", "item": post}
 
     logger.info("[CrawlerAdapter] 全平台搜索完成")

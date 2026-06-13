@@ -296,6 +296,15 @@ def update_user_role(user_id: str, role: str) -> bool:
         return cursor.rowcount > 0
 
 
+def update_user_profile(user_id: str, nickname: str) -> bool:
+    """更新用户昵称等基本信息。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET nickname = ? WHERE id = ?", (nickname, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def deactivate_user(user_id: str) -> bool:
     """L2 v2.2: 同时设置 tokens_invalid_after = NOW，使该用户所有未过期 token 立即失效"""
     with get_db_connection() as conn:

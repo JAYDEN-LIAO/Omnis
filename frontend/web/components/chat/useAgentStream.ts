@@ -14,6 +14,7 @@ import { parseSSE } from './sse-parser';
 import type {
   AssistantMessage,
   ParsedSSEEvent,
+  SearchStreamItem,
   SSEToolCall,
   SSEToolResult,
   ToolCallBlock,
@@ -23,6 +24,7 @@ import type {
 interface SendOptions {
   sessionId?: string | null;
   baseUrl?: string;
+  onSessionId?: (sid: string) => void;
 }
 
 interface UseAgentStreamResult {
@@ -32,6 +34,7 @@ interface UseAgentStreamResult {
   send: (messages: { role: 'user' | 'assistant'; content: string }[], options?: SendOptions) => Promise<void>;
   cancel: () => void;
   reset: () => void;
+  onSessionId?: (sid: string) => void;
 }
 
 const EMPTY_ASSISTANT: AssistantMessage = {
@@ -109,6 +112,11 @@ export function useAgentStream(): UseAgentStreamResult {
       try {
         for await (const ev of parseSSE(reader)) {
           if (controller.signal.aborted) break;
+          // session 事件直接回调，不经过 applyEvent
+          if (ev.event === 'session') {
+            options.onSessionId?.(ev.data.session_id);
+            continue;
+          }
           applyEvent(ev);
           // 每事件让出，React 得以渲染当前累积的文本
           await new Promise((r) => setTimeout(r, 0));
@@ -157,6 +165,12 @@ export function useAgentStream(): UseAgentStreamResult {
           next.toolCalls = next.toolCalls.map((b) =>
             b.call_id === tp.call_id ? { ...b, status: 'streaming' as const } : b,
           );
+          // 累积实时搜索结果条目（web_search 流式推送）
+          const partial = tp.partial;
+          if (partial?.type === 'item' && partial?.item) {
+            const item = partial.item as SearchStreamItem;
+            next.progressItems = [...(next.progressItems || []), item];
+          }
           break;
         }
         case 'tool_result': {

@@ -76,5 +76,10 @@ def emit_error(message: str, error_type: str = "unknown", call_id: Optional[str]
     return emit("error", payload)
 
 
+def emit_session(session_id: str) -> str:
+    """返回后端分配的 session_id，前端用来保存当前对话标识。"""
+    return emit("session", {"session_id": session_id})
+
+
 def emit_done() -> str:
     return "event: done\ndata:\n\n"

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, Gauge, Activity, AlertCircle, Loader2 } from 'lucide-react';
 
 interface AdminStats {
@@ -46,75 +45,65 @@ export default function AdminHomePage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">管理总览</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          MediaRadar v2.2 · 多用户 SaaS · 订阅平台
+          Omnis v2.2 · 多用户 SaaS · 订阅平台
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">注册用户</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground/60" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{stats?.total_users ?? '—'}</div>
-            <p className="mt-1 text-xs text-muted-foreground/60">
-              <a href="/admin/users" className="text-primary hover:underline">查看用户管理</a>
-            </p>
-          </CardContent>
-        </Card>
+        <div className="glass-slab rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>注册用户</span>
+            <Users className="h-4 w-4 opacity-40" style={{ color: 'var(--on-surface-variant)' }} />
+          </div>
+          <div className="text-2xl font-semibold" style={{ color: 'var(--on-surface)' }}>{stats?.total_users ?? '—'}</div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            <a href="/admin/users" style={{ color: 'var(--primary-gold)' }} className="hover:underline">查看用户管理</a>
+          </p>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">活跃订阅</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground/60" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{stats?.active_subscriptions ?? '—'}</div>
-            <p className="mt-1 text-xs text-muted-foreground/60">
-              总共 {stats?.total_subscriptions ?? 0} 条 · 跨用户汇总
-            </p>
-          </CardContent>
-        </Card>
+        <div className="glass-slab rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>活跃订阅</span>
+            <Activity className="h-4 w-4 opacity-40" style={{ color: 'var(--on-surface-variant)' }} />
+          </div>
+          <div className="text-2xl font-semibold" style={{ color: 'var(--on-surface)' }}>{stats?.active_subscriptions ?? '—'}</div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            总共 {stats?.total_subscriptions ?? 0} 条 · 跨用户汇总
+          </p>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">今日话题</CardTitle>
-            <Gauge className="h-4 w-4 text-muted-foreground/60" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{stats?.today_topics ?? '—'}</div>
-            <p className="mt-1 text-xs text-muted-foreground/60">过去 24 小时活跃话题</p>
-          </CardContent>
-        </Card>
+        <div className="glass-slab rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>今日话题</span>
+            <Gauge className="h-4 w-4 opacity-40" style={{ color: 'var(--on-surface-variant)' }} />
+          </div>
+          <div className="text-2xl font-semibold" style={{ color: 'var(--on-surface)' }}>{stats?.today_topics ?? '—'}</div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>过去 24 小时活跃话题</p>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">调度器</CardTitle>
-            <AlertCircle className="h-4 w-4 text-muted-foreground/60" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-semibold ${stats?.scheduler_active ? 'text-emerald-600' : 'text-muted-foreground'}`}>
-              {stats?.scheduler_active ? '运行中' : '已停止'}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground/60">
-              {stats?.scheduler_active ? '定时扫描已启用' : '需手动启动调度器'}
-            </p>
-          </CardContent>
-        </Card>
+        <div className="glass-slab rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--on-surface-variant)' }}>调度器</span>
+            <AlertCircle className="h-4 w-4 opacity-40" style={{ color: 'var(--on-surface-variant)' }} />
+          </div>
+          <div className="text-2xl font-semibold" style={{ color: stats?.scheduler_active ? 'var(--status-success)' : 'var(--on-surface-variant)' }}>
+            {stats?.scheduler_active ? '运行中' : '已停止'}
+          </div>
+          <p className="mt-1 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+            {stats?.scheduler_active ? '定时扫描已启用' : '需手动启动调度器'}
+          </p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>快捷入口</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>· <a href="/admin/users" className="text-primary hover:underline">用户管理</a> — 搜索、禁用用户</p>
-          <p>· <a href="/admin/quota" className="text-primary hover:underline">配额调整</a> — 查看和修改用户配额</p>
-          <p>· <a href="/dashboard" className="text-primary hover:underline">全局仪表盘</a> — 系统级数据视图</p>
-          <p>· <a href="/settings/system" className="text-primary hover:underline">系统设置</a> — 关键词 / 平台 / 推送配置</p>
-        </CardContent>
-      </Card>
+      <div className="glass-slab rounded-xl p-5">
+        <h3 className="serif-headline text-sm font-semibold mb-3" style={{ color: 'var(--on-surface)' }}>快捷入口</h3>
+        <div className="space-y-2 text-sm" style={{ color: 'var(--on-surface-variant)' }}>
+          <p>· <a href="/admin/users" style={{ color: 'var(--primary-gold)' }} className="hover:underline">用户管理</a> — 搜索、禁用用户</p>
+          <p>· <a href="/admin/quota" style={{ color: 'var(--primary-gold)' }} className="hover:underline">配额调整</a> — 查看和修改用户配额</p>
+          <p>· <a href="/dashboard" style={{ color: 'var(--primary-gold)' }} className="hover:underline">全局仪表盘</a> — 系统级数据视图</p>
+          <p>· <a href="/settings/system" style={{ color: 'var(--primary-gold)' }} className="hover:underline">系统设置</a> — 关键词 / 平台 / 推送配置</p>
+        </div>
+      </div>
     </div>
   );
 }

@@ -20,6 +20,7 @@ const VALID_EVENTS: ReadonlySet<string> = new Set([
   'tool_result',
   'error',
   'done',
+  'session',
 ]);
 
 export async function* parseSSE(
@@ -89,7 +90,10 @@ export async function* parseSSE(
   }
 
   function _flush(): ParsedSSEEvent | null {
-    if (currentEvent === null) return null;
+    if (currentEvent === null) {
+      dataLines.length = 0; // 未知事件：清理数据防止泄漏到下一个事件
+      return null;
+    }
 
     const raw = dataLines.join('\n');
 

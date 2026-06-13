@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -101,19 +100,16 @@ export default function AdminUsersPage() {
         </form>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>用户列表</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="glass-slab rounded-xl p-5">
+        <h3 className="serif-headline text-sm font-semibold mb-4" style={{ color: 'var(--on-surface)' }}>用户列表</h3>
           {loading ? (
             <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--on-surface-variant)' }} />
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-b border-border/50 text-left text-xs text-muted-foreground">
+                <thead className="border-b text-left text-xs" style={{ borderColor: 'var(--border-refined)', color: 'var(--on-surface-variant)' }}>
                   <tr>
                     <th className="py-2 pr-3">邮箱</th>
                     <th className="py-2 pr-3">昵称</th>
@@ -126,27 +122,31 @@ export default function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {data?.items.map(u => (
-                    <tr key={u.id} className="border-b border-border/30 last:border-0">
-                      <td className="py-2 pr-3 font-mono text-xs">{u.email || '—'}</td>
-                      <td className="py-2 pr-3">{u.nickname}</td>
+                    <tr key={u.id} className="border-b last:border-0" style={{ borderColor: 'var(--border-faint)' }}>
+                      <td className="py-2 pr-3 font-mono text-xs" style={{ color: 'var(--on-surface)' }}>{u.email || '—'}</td>
+                      <td className="py-2 pr-3" style={{ color: 'var(--on-surface)' }}>{u.nickname}</td>
                       <td className="py-2 pr-3">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-                        }`}>
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          style={u.role === 'admin'
+                            ? { background: 'var(--primary-gold-soft)', color: 'var(--primary-gold)' }
+                            : { background: 'var(--surface-card)', color: 'var(--on-surface-variant)' }
+                          }>
                           {u.role}
                         </span>
                       </td>
                       <td className="py-2 pr-3">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          u.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                        }`}>
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          style={u.is_active
+                            ? { background: 'var(--status-success-bg)', color: 'var(--status-success)' }
+                            : { background: 'var(--status-error-bg)', color: 'var(--status-error)' }
+                          }>
                           {u.is_active ? '正常' : '已禁用'}
                         </span>
                       </td>
-                      <td className="py-2 pr-3 text-xs text-muted-foreground">
+                      <td className="py-2 pr-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
                         {u.created_at?.slice(0, 10) || '—'}
                       </td>
-                      <td className="py-2 pr-3 text-xs text-muted-foreground">
+                      <td className="py-2 pr-3 text-xs" style={{ color: 'var(--on-surface-variant)' }}>
                         {u.last_login_at?.slice(0, 10) || '从未'}
                       </td>
                       <td className="py-2 pr-3">
@@ -161,12 +161,11 @@ export default function AdminUsersPage() {
                 </tbody>
               </table>
               {data?.items.length === 0 && (
-                <div className="py-8 text-center text-sm text-muted-foreground">暂无用户</div>
+                <div className="py-8 text-center text-sm" style={{ color: 'var(--on-surface-variant)' }}>暂无用户</div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
       {data && data.has_next && (
         <div className="flex justify-center">

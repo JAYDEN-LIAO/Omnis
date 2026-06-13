@@ -58,17 +58,7 @@ class AgentMemoryStore:
                     created_at TEXT NOT NULL
                 )
             """)
-            # pattern_memory: 行为模式表
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS pattern_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    pattern_type TEXT NOT NULL,
-                    pattern_value TEXT NOT NULL,
-                    frequency INTEGER DEFAULT 1,
-                    updated_at TEXT NOT NULL
-                )
-            """)
+            # pattern_memory: 已废弃（之前的行为模式表，保留表结构兼容存量数据）
             # conversation_summary: 对话摘要表
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS conversation_summary (
@@ -96,7 +86,7 @@ class AgentMemoryStore:
             """)
 
             # v2.2：为存量表添加 owner_id（幂等迁移）
-            for tbl in ("conversation_summary", "entity_memory", "fact_memory", "pattern_memory", "chat_messages"):
+            for tbl in ("conversation_summary", "entity_memory", "fact_memory", "chat_messages"):
                 try:
                     cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id TEXT DEFAULT ''")
                 except Exception:
@@ -118,10 +108,6 @@ class AgentMemoryStore:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_fact_owner_session_expiry
                 ON fact_memory(owner_id, session_id, expires_at)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_pattern_owner_session_updated
-                ON pattern_memory(owner_id, session_id, updated_at DESC)
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_summary_owner_created
@@ -288,59 +274,6 @@ class AgentMemoryStore:
                 """, (session_id, owner_id, now))
             return [dict(row) for row in cursor.fetchall()]
 
-    # ==================== pattern_memory ====================
-
-    def upsert_pattern(
-        self,
-        session_id: str,
-        pattern_type: str,
-        pattern_value: str,
-        owner_id: str = ""
-    ):
-        """写入或更新行为模式（owner 必传）"""
-        now = datetime.now().isoformat()
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE pattern_memory SET
-                    pattern_value=?,
-                    frequency=frequency+1,
-                    updated_at=?
-                WHERE session_id=? AND owner_id=? AND pattern_type=?
-            """, (pattern_value, now, session_id, owner_id, pattern_type))
-            if cursor.rowcount == 0:
-                cursor.execute("""
-                    INSERT INTO pattern_memory (session_id, owner_id, pattern_type, pattern_value, frequency, updated_at)
-                    VALUES (?, ?, ?, ?, 1, ?)
-                """, (session_id, owner_id, pattern_type, pattern_value, now))
-            conn.commit()
-
-    def get_recent_patterns(
-        self,
-        session_id: str,
-        owner_id: str,
-        days: int = 7,
-        include_legacy: bool = True
-    ) -> List[Dict]:
-        """获取最近 N 天内的行为模式（owner 隔离 + legacy 兼容）"""
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        with self._get_conn() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            if include_legacy:
-                cursor.execute("""
-                    SELECT pattern_type, pattern_value, frequency
-                    FROM pattern_memory
-                    WHERE session_id=? AND (owner_id=? OR owner_id='') AND updated_at > ?
-                """, (session_id, owner_id, cutoff))
-            else:
-                cursor.execute("""
-                    SELECT pattern_type, pattern_value, frequency
-                    FROM pattern_memory
-                    WHERE session_id=? AND owner_id=? AND updated_at > ?
-                """, (session_id, owner_id, cutoff))
-            return [dict(row) for row in cursor.fetchall()]
-
     # ==================== conversation_summary ====================
 
     def save_summary(self, session_id: str, summary: str, entities: List[str], outcome: str = None, owner_id: str = ""):
@@ -472,7 +405,6 @@ class AgentMemoryStore:
         v2.2 P2.5：全表 TTL 清理。
         - fact_memory: 90 天（已有 expires_at 字段）
         - entity_memory: 1 年（按 last_query_time 删）
-        - pattern_memory: 半年（按 updated_at 删）
         - chat_messages: 90 天（按 created_at 删）
         - conversation_summary: 90 天（按 created_at 删）
         """
@@ -492,13 +424,6 @@ class AgentMemoryStore:
                 "DELETE FROM entity_memory WHERE last_query_time < ?", (cutoff_1y,)
             )
             stats["entity_memory"] = cursor.rowcount
-
-            # pattern_memory: 半年
-            cutoff_half = (datetime.now() - timedelta(days=180)).isoformat()
-            cursor.execute(
-                "DELETE FROM pattern_memory WHERE updated_at < ?", (cutoff_half,)
-            )
-            stats["pattern_memory"] = cursor.rowcount
 
             # chat_messages: 90 天
             cutoff_90 = (datetime.now() - timedelta(days=90)).isoformat()
@@ -536,7 +461,7 @@ class AgentMemoryStore:
         deleted_total = 0
         with self._get_conn() as conn:
             cursor = conn.cursor()
-            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary", "chat_messages"]:
+            for table in ["entity_memory", "fact_memory", "conversation_summary", "chat_messages"]:
                 if include_legacy:
                     cursor.execute(
                         f"DELETE FROM {table} WHERE session_id=? AND (owner_id=? OR owner_id='')",
@@ -556,7 +481,7 @@ class AgentMemoryStore:
         with self._get_conn() as conn:
             cursor = conn.cursor()
             stats = {}
-            for table in ["entity_memory", "fact_memory", "pattern_memory", "conversation_summary", "chat_messages"]:
+            for table in ["entity_memory", "fact_memory", "conversation_summary", "chat_messages"]:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[table] = cursor.fetchone()[0]
             return stats

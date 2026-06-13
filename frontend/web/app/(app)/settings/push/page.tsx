@@ -5,18 +5,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, MessageSquare, Send, Loader2, Check, Plus, X, TestTube } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { pushApi, type PushConfig } from '@/lib/api';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 
 const emailSchema = z.object({
   enabled: z.boolean(),
@@ -39,11 +30,14 @@ const webhookSchema = z.object({
 type EmailValues = z.infer<typeof emailSchema>;
 type WebhookValues = z.infer<typeof webhookSchema>;
 
-const channels = [
-  { id: 'email', name: '邮件', icon: Mail, desc: 'SMTP 邮件告警' },
-  { id: 'wecom', name: '企业微信', icon: MessageSquare, desc: '群机器人 Webhook' },
-  { id: 'feishu', name: '飞书', icon: Send, desc: '群机器人 Webhook' },
+const tabs = [
+  { id: 'email', label: '邮件配置' },
+  { id: 'wecom', label: '企业微信' },
+  { id: 'feishu', label: '飞书' },
 ] as const;
+
+const INPUT_CLASS =
+  'w-full px-4 py-3 rounded-lg bg-white/70 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm text-[color:var(--on-surface)] placeholder:text-[color:var(--on-surface-variant)]/40';
 
 export default function PushSettingsPage() {
   const [activeTab, setActiveTab] = useState<string>('email');
@@ -54,37 +48,39 @@ export default function PushSettingsPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          {channels.map((c) => (
-            <TabsTrigger key={c.id} value={c.id} className="gap-2">
-              <c.icon className="h-4 w-4" />
-              {c.name}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+    <div className="max-w-[1400px] mx-auto">
+      {/* Sub-tabs with active-tab-line */}
+      <div className="flex border-b border-[color:var(--border-faint)] mb-8 gap-10">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setActiveTab(t.id)}
+            className={`label-caps text-[11px] pb-4 relative transition-colors ${
+              activeTab === t.id
+                ? 'text-[color:var(--primary-gold)]'
+                : 'text-[color:var(--on-surface-variant)] hover:text-[color:var(--primary-gold)]'
+            }`}
+          >
+            {t.label}
+            {activeTab === t.id && (
+              <div className="active-tab-line absolute inset-x-0 bottom-0 w-full h-[2px] bg-[color:var(--primary-gold)]" />
+            )}
+          </button>
+        ))}
+      </div>
 
-        {isLoading ? (
-          <Card className="mt-4">
-            <CardContent className="py-8">
-              <Skeleton className="h-40 w-full" />
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <TabsContent value="email" forceMount className={cn('space-y-4', activeTab !== 'email' && 'hidden')}>
-              <EmailForm config={configs?.email} />
-            </TabsContent>
-            <TabsContent value="wecom" forceMount className={cn('space-y-4', activeTab !== 'wecom' && 'hidden')}>
-              <WebhookForm channel="wecom" name="企业微信" config={configs?.wecom} />
-            </TabsContent>
-            <TabsContent value="feishu" forceMount className={cn('space-y-4', activeTab !== 'feishu' && 'hidden')}>
-              <WebhookForm channel="feishu" name="飞书" config={configs?.feishu} />
-            </TabsContent>
-          </>
-        )}
-      </Tabs>
+      {isLoading ? (
+        <div className="glass-slab rounded-xl p-5">
+          <Skeleton className="h-40 w-full" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {activeTab === 'email' && <EmailForm config={configs?.email} />}
+          {activeTab === 'wecom' && <WebhookForm channel="wecom" name="WeCom" config={configs?.wecom} />}
+          {activeTab === 'feishu' && <WebhookForm channel="feishu" name="Feishu (Lark)" config={configs?.feishu} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -114,126 +110,169 @@ function EmailForm({ config }: { config?: PushConfig }) {
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Mail className="h-4 w-4" /> 邮件推送配置
-            </CardTitle>
-            <CardDescription>通过 SMTP 发送预警邮件，支持 TLS</CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">启用</Label>
-            <Switch
+    <section className="glass-slab rounded-xl p-8">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h2 className="serif-headline text-2xl text-[color:var(--on-surface)]">邮件服务器配置</h2>
+          <p className="label-caps text-[10px] text-[color:var(--on-surface-variant)] mt-1">SMTP 协议设置</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">启用推送</span>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer switch-input"
               checked={watched.enabled}
-              onCheckedChange={(v) => form.setValue('enabled', v)}
+              onChange={(e) => form.setValue('enabled', e.target.checked)}
             />
+            <div className="w-11 h-6 bg-[color:var(--border-faint)] rounded-full transition-colors switch-bg" />
+            <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform switch-dot" />
+          </label>
+        </div>
+      </div>
+
+      <form onSubmit={form.handleSubmit((v) => save.mutate(v))}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
+          <div className="space-y-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">SMTP 主机</label>
+            <input {...form.register('smtp_host')} placeholder="smtp.mediaradar.ai" className={INPUT_CLASS} type="text" />
+          </div>
+          <div className="space-y-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">端口</label>
+            <input {...form.register('smtp_port', { valueAsNumber: true })} placeholder="465" className={INPUT_CLASS} type="number" />
+          </div>
+          <div className="space-y-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">认证用户</label>
+            <input {...form.register('smtp_user')} placeholder="admin@mediaradar.ai" className={INPUT_CLASS} type="text" />
+          </div>
+          <div className="space-y-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">密码</label>
+            <input {...form.register('smtp_password')} placeholder="留空保留原密码" className={INPUT_CLASS} type="password" />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">发件人邮箱</label>
+            <input {...form.register('from_addr')} placeholder="alerts-no-reply@mediaradar.ai" className={INPUT_CLASS} type="email" />
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>SMTP 主机</Label>
-              <Input {...form.register('smtp_host')} placeholder="smtp.example.com" />
-            </div>
-            <div className="space-y-2">
-              <Label>SMTP 端口</Label>
-              <Input type="number" {...form.register('smtp_port', { valueAsNumber: true })} />
-            </div>
-            <div className="space-y-2">
-              <Label>用户名</Label>
-              <Input {...form.register('smtp_user')} />
-            </div>
-            <div className="space-y-2">
-              <Label>密码</Label>
-              <Input type="password" {...form.register('smtp_password')} placeholder="留空保留原密码" />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>发件人邮箱</Label>
-              <Input type="email" {...form.register('from_addr')} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>收件人邮箱</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="email"
-                  value={emailDraft}
-                  onChange={(e) => setEmailDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (emailDraft) {
-                        form.setValue('to_addrs', [...toAddrs, emailDraft], { shouldValidate: true });
-                        setEmailDraft('');
-                      }
-                    }
-                  }}
-                  placeholder="回车添加"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
+
+        <div className="mt-8 pt-8 border-t border-[color:var(--border-faint)] space-y-6">
+          <div className="space-y-4">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">收件人列表</label>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={emailDraft}
+                onChange={(e) => setEmailDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
                     if (emailDraft) {
                       form.setValue('to_addrs', [...toAddrs, emailDraft], { shouldValidate: true });
                       setEmailDraft('');
                     }
-                  }}
+                  }
+                }}
+                placeholder="添加邮箱地址..."
+                className={INPUT_CLASS + ' flex-1'}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (emailDraft) {
+                    form.setValue('to_addrs', [...toAddrs, emailDraft], { shouldValidate: true });
+                    setEmailDraft('');
+                  }
+                }}
+                className="brushed-gold w-12 flex items-center justify-center rounded-lg hover:opacity-95 transition-opacity text-[color:oklch(0.2_0.05_85)]"
+              >
+                <span className="material-symbols-outlined">add</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {toAddrs.map((a) => (
+                <span
+                  key={a}
+                  className="inline-flex items-center gap-2 bg-white/70 text-[color:var(--on-surface)] px-3 py-1.5 rounded-full label-caps text-[10px] border border-[color:var(--border-faint)]"
                 >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {toAddrs.map((a) => (
-                  <Badge key={a} variant="secondary" className="gap-1 pl-3 pr-1.5">
-                    {a}
-                    <button
-                      type="button"
-                      onClick={() => form.setValue('to_addrs', toAddrs.filter((x) => x !== a), { shouldValidate: true })}
-                      className="rounded p-0.5 hover:bg-destructive/20"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
+                  {a}
+                  <button
+                    type="button"
+                    onClick={() => form.setValue('to_addrs', toAddrs.filter((x) => x !== a), { shouldValidate: true })}
+                    className="hover:text-[color:var(--status-error)] transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">close</span>
+                  </button>
+                </span>
+              ))}
+              {toAddrs.length === 0 && (
+                <span className="text-xs text-[color:var(--on-surface-faint)]">暂无收件人</span>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label className="text-sm">启用 TLS</Label>
-            <Switch
-              checked={watched.smtp_use_tls}
-              onCheckedChange={(v) => form.setValue('smtp_use_tls', v)}
-            />
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 caustic-card rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-[color:var(--primary-gold)]" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
+                <div>
+                  <p className="font-semibold text-sm text-[color:var(--on-surface)]">TLS 加密</p>
+                  <p className="text-[12px] text-[color:var(--on-surface-variant)]">强制安全连接</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer switch-input"
+                  checked={watched.smtp_use_tls}
+                  onChange={(e) => form.setValue('smtp_use_tls', e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-[color:var(--border-faint)] rounded-full transition-colors switch-bg" />
+                <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform switch-dot" />
+              </label>
+            </div>
+            <div className="w-full md:w-64 caustic-card rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-[color:var(--primary-gold)]">warning</span>
+                <div>
+                  <p className="font-semibold text-sm text-[color:var(--on-surface)]">风险等级</p>
+                  <p className="text-[12px] text-[color:var(--on-surface-variant)]">最低阈值</p>
+                </div>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                {...form.register('risk_min_level', { valueAsNumber: true })}
+                className="w-12 bg-white border-none text-center font-bold text-[color:var(--primary-gold)] focus:ring-0"
+              />
+            </div>
           </div>
+        </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label className="text-sm">最低告警风险等级（1-5）</Label>
-            <Input
-              type="number"
-              min={1}
-              max={5}
-              className="w-20"
-              {...form.register('risk_min_level', { valueAsNumber: true })}
-            />
-          </div>
-
-          <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending || !watched.enabled}>
-              <TestTube className="mr-2 h-4 w-4" /> 发送测试
-            </Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-              保存配置
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+        <div className="mt-8 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => test.mutate()}
+            disabled={test.isPending || !watched.enabled}
+            className="px-6 py-2.5 rounded-lg label-caps text-[10px] text-[color:var(--on-surface-variant)] border border-[color:var(--border-faint)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            发送测试
+          </button>
+          <button
+            type="submit"
+            disabled={save.isPending}
+            className="brushed-gold px-6 py-2.5 rounded-lg label-caps text-[10px] flex items-center gap-2 hover:opacity-95 shadow-lg transition-all disabled:opacity-50 text-[color:oklch(0.2_0.05_85)]"
+          >
+            {save.isPending ? (
+              <span className="material-symbols-outlined text-[18px] animate-spin">sync</span>
+            ) : (
+              <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>save</span>
+            )}
+            保存配置
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -258,52 +297,90 @@ function WebhookForm({ channel, name, config }: { channel: string; name: string;
     onSuccess: (r) => toast.success(r.msg || '测试成功'),
   });
 
+  const isFeishu = channel === 'feishu';
+  const iconName = isFeishu ? 'security' : 'report';
+  const riskLabel = isFeishu ? '优先级阈值' : '预警风险等级';
+  const riskDesc = isFeishu ? '最低预警级别' : '1-5 级敏感度';
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <MessageSquare className="h-4 w-4" /> {name} Webhook 配置
-            </CardTitle>
-            <CardDescription>填写 {name} 群机器人 Webhook URL</CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">启用</Label>
-            <Switch
-              checked={watched.enabled}
-              onCheckedChange={(v) => form.setValue('enabled', v)}
+    <section className="glass-slab rounded-xl p-8">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h2 className="serif-headline text-2xl text-[color:var(--on-surface)]">
+            {name} {isFeishu ? '(Lark)' : ''} Webhook
+          </h2>
+          <p className="label-caps text-[10px] text-[color:var(--on-surface-variant)] mt-1">
+            {isFeishu ? '企业协作消息' : '企业微信集成'}
+          </p>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            className="sr-only peer switch-input"
+            checked={watched.enabled}
+            onChange={(e) => form.setValue('enabled', e.target.checked)}
+          />
+          <div className="w-11 h-6 bg-[color:var(--border-faint)] rounded-full transition-colors switch-bg" />
+          <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform switch-dot" />
+        </label>
+      </div>
+
+      <form onSubmit={form.handleSubmit((v) => save.mutate(v))}>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]">
+              {isFeishu ? 'Webhook 地址' : 'Webhook URL'}
+            </label>
+            <input
+              {...form.register('webhook_url')}
+              placeholder={isFeishu ? 'https://open.feishu.cn/open-apis/bot/v2/hook/...' : 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'}
+              className={INPUT_CLASS}
+              type="text"
             />
           </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Webhook URL</Label>
-            <Input {...form.register('webhook_url')} placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label className="text-sm">最低告警风险等级（1-5）</Label>
-            <Input
+          <div className="w-full md:w-80 caustic-card rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-[color:var(--primary-gold)]">{iconName}</span>
+              <div>
+                <p className="font-semibold text-sm text-[color:var(--on-surface)]">{riskLabel}</p>
+                <p className="text-[12px] text-[color:var(--on-surface-variant)]">{riskDesc}</p>
+              </div>
+            </div>
+            <input
               type="number"
               min={1}
               max={5}
-              className="w-20"
               {...form.register('risk_min_level', { valueAsNumber: true })}
+              className="w-12 bg-white border-none text-center font-bold text-[color:var(--primary-gold)] focus:ring-0"
             />
           </div>
-          <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending || !watched.enabled}>
-              <TestTube className="mr-2 h-4 w-4" /> 发送测试
-            </Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-              保存配置
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+        </div>
+
+        <div className="mt-8 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => test.mutate()}
+            disabled={test.isPending || !watched.enabled}
+            className="px-6 py-2.5 rounded-lg label-caps text-[10px] text-[color:var(--on-surface-variant)] border border-[color:var(--border-faint)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isFeishu ? '发送测试消息' : '测试 Webhook'}
+          </button>
+          <button
+            type="submit"
+            disabled={save.isPending}
+            className="brushed-gold px-6 py-2.5 rounded-lg label-caps text-[10px] flex items-center gap-2 hover:opacity-95 shadow-lg transition-all disabled:opacity-50 text-[color:oklch(0.2_0.05_85)]"
+          >
+            {save.isPending ? (
+              <span className="material-symbols-outlined text-[18px] animate-spin">sync</span>
+            ) : (
+              <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                {isFeishu ? 'cloud_done' : 'check_circle'}
+              </span>
+            )}
+            保存配置
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

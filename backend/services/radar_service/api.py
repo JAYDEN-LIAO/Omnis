@@ -186,6 +186,22 @@ def api_save_settings(req: SettingsRequest, current_user: dict = Depends(get_cur
     save_system_settings(req.model_dump())
     reload_config()
 
+    # 同步关键词到用户的订阅表，使 Agent 能通过 list_subscriptions 看到
+    try:
+        from core.subscription_db import list_subscriptions as _list_subs, create_subscription as _create_sub
+        existing = {s["name"] for s in _list_subs(current_user["id"])}
+        for kw in req.keywords:
+            kw_name = kw["text"] if isinstance(kw, dict) else str(kw)
+            if kw_name not in existing:
+                _create_sub(
+                    owner_id=current_user["id"],
+                    name=kw_name,
+                    type="keyword",
+                    platforms=list(req.platforms) if req.platforms else [],
+                )
+    except Exception as e:
+        logger.warning(f"[Settings] 同步关键词到订阅失败（非致命）: {e}")
+
     try:
         from .scheduler import reschedule_if_running, reschedule_daily_summary_if_running
         reschedule_if_running(req.start_time, req.monitor_frequency)

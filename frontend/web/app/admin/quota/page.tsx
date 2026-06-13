@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -41,14 +40,12 @@ export default function AdminQuotaPage() {
         </p>
       </div>
 
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>默认配额</CardTitle>
-          <CardDescription>
-            这些值定义在 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">backend/core/quota_db.py</code>，修改后需重启服务。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <div className="glass-slab rounded-xl p-5 max-w-xl">
+        <h3 className="serif-headline text-sm font-semibold mb-1" style={{ color: 'var(--on-surface)' }}>默认配额</h3>
+        <p className="text-xs mb-4" style={{ color: 'var(--on-surface-variant)' }}>
+          这些值定义在 <code className="rounded px-1.5 py-0.5 text-xs" style={{ background: 'var(--surface-card)', color: 'var(--on-surface-variant)' }}>backend/core/quota_db.py</code>，修改后需重启服务。
+        </p>
+        <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="max_subs">最大订阅数</Label>
             <Input
@@ -92,18 +89,16 @@ export default function AdminQuotaPage() {
             <Save className="mr-1.5 h-4 w-4" />
             保存（v1+ 实现）
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Card className="max-w-xl border-dashed">
-        <CardHeader>
-          <CardTitle className="text-base">按用户调整</CardTitle>
-          <CardDescription>
-            v1+ 实现：列出所有用户 → 点进用户 → 编辑其配额。当前请用 API：
-            <code className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">PUT /api/admin/users/{'{id}'}/quota</code>
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="glass-slab rounded-xl p-5 max-w-xl" style={{ borderStyle: 'dashed', borderColor: 'var(--border-faint)' }}>
+        <h3 className="serif-headline text-sm font-semibold mb-1" style={{ color: 'var(--on-surface)' }}>按用户调整</h3>
+        <p className="text-xs" style={{ color: 'var(--on-surface-variant)' }}>
+          v1+ 实现：列出所有用户 → 点进用户 → 编辑其配额。当前请用 API：
+          <code className="ml-2 rounded px-1.5 py-0.5 text-xs" style={{ background: 'var(--surface-card)', color: 'var(--on-surface-variant)' }}>PUT /api/admin/users/{'{id}'}/quota</code>
+        </p>
+      </div>
     </div>
   );
 }

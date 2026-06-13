@@ -1,5 +1,5 @@
 // =========================================================================
-// MediaRadar Web — 通用 TypeScript 类型
+// Omnis Web — 通用 TypeScript 类型
 // =========================================================================
 
 export type Sentiment = 'positive' | 'neutral' | 'negative';

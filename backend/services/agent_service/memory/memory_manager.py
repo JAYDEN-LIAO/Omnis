@@ -13,7 +13,7 @@ from .memory_store import AgentMemoryStore
 logger = get_logger("agent.memory")
 
 # working_memory 800 字符上限
-WORKING_MEMORY_MAX_CHARS = 800
+WORKING_MEMORY_MAX_CHARS = 1200
 
 
 class AgentMemoryManager:
@@ -30,62 +30,91 @@ class AgentMemoryManager:
 
     def build_working_memory(self, session_id: str, owner_id: str = "") -> str:
         """
-        对话开始时调用：检索长期记忆，构建【用户记忆】段落。
-        >800 字符时降级（只保留 entity+fact 两段）
-        owner_id 必传，store 内部按 (session_id, owner_id) 隔离检索
+        对话开始时调用：检索长期记忆 + 用户订阅画像，构建【用户记忆】段落。
+        >1200 字符时降级（只保留最先的两个区块）。
+        owner_id 必传，store 内部按 owner_id 隔离检索。
         """
         parts = []
 
-        # 检索高频实体
-        entities = self.store.get_frequent_entities(session_id, owner_id, min_count=2)
-        if entities:
-            entity_lines = []
-            for e in entities:
-                sensitivity_tag = f"[敏感度: {e['sensitivity']}]" if e.get('sensitivity') != 'balanced' else ""
-                entity_lines.append(
-                    f"- {e['entity']}（{e['entity_type']}）{sensitivity_tag}，"
-                    f"查询 {e['query_count']} 次"
-                    + (f"，摘要: {e['last_summary']}" if e.get('last_summary') else "")
-                )
-            parts.append("【用户高频关注实体】\n" + "\n".join(entity_lines))
+        # 1. 用户订阅画像（继承自系统配置）
+        sub_profile = self._build_subscription_profile(owner_id)
+        if sub_profile:
+            parts.append(sub_profile)
 
-        # v2.2 P2.1：跨 session 长期关注实体（新 session 也能看到）
-        global_entities = self.store.get_global_entities(owner_id, min_count=3, limit=10)
+        # 2. 跨 session 长期关注实体
+        global_entities = self.store.get_global_entities(owner_id, min_count=2, limit=8)
         if global_entities:
-            global_lines = [
-                f"- {e['entity']}（{e['entity_type']}），历史上累计查询 {e['total_count']} 次"
+            lines = [
+                f"- {e['entity']}（{e['entity_type']}），累计关注 {e['total_count']} 次"
                 for e in global_entities
             ]
-            parts.append("【用户长期关注（跨 session）】\n" + "\n".join(global_lines))
+            parts.append("【长期关注】\n" + "\n".join(lines))
 
-        # 检索事实记忆
+        # 3. 事实记忆（跨 session）
         facts = self.store.get_valid_facts(session_id, owner_id)
         if facts:
-            fact_lines = [f"- {f['entity']}: {f['content']}" for f in facts[:5]]
-            parts.append("【已确认事实】\n" + "\n".join(fact_lines))
-
-        # 检索行为模式
-        patterns = self.store.get_recent_patterns(session_id, owner_id, days=7)
-        if patterns:
-            pattern_lines = [f"- {p['pattern_type']}: {p['pattern_value']}" for p in patterns]
-            parts.append("【用户偏好】\n" + "\n".join(pattern_lines))
+            lines = [f"- {f['entity']}: {f['content']}" for f in facts[:6]]
+            parts.append("【已确认事实】\n" + "\n".join(lines))
 
         if not parts:
             return ""
 
         full = "\n\n".join(parts)
 
-        # 超 800 字符时降级
         if len(full) > WORKING_MEMORY_MAX_CHARS:
-            degraded_parts = []
+            # 取前两个区块
+            kept = []
+            char_count = 0
             for p in parts:
-                if "【用户高频关注实体】" in p or "【已确认事实】" in p:
-                    degraded_parts.append(p)
-            if degraded_parts:
-                return "\n\n".join(degraded_parts)
-            return parts[0] if parts else ""
+                if char_count + len(p) > WORKING_MEMORY_MAX_CHARS:
+                    break
+                kept.append(p)
+                char_count += len(p)
+            return "\n\n".join(kept) if kept else parts[0]
 
         return full
+
+    def _build_subscription_profile(self, owner_id: str) -> str:
+        """
+        从 subscription / quota 表拉取用户配置，返回格式化字符串。
+        无数据或出错时返回空字符串。
+        """
+        if not owner_id:
+            return ""
+        try:
+            from core.subscription_db import list_subscriptions
+            from core.quota_db import get_scan_config
+
+            subs = list_subscriptions(owner_id) if callable(list_subscriptions) else []
+            scan = get_scan_config(owner_id) if callable(get_scan_config) else {}
+
+            lines = []
+
+            # 订阅关键词
+            keywords = [s["name"] for s in subs if s.get("type") == "keyword" and s.get("name")]
+            if keywords:
+                lines.append(f"- 监控关键词：{'、'.join(keywords[:8])}")
+
+            # 其他订阅类型
+            for s_type, label in [("person", "人物"), ("event", "事件"), ("competitor", "竞品")]:
+                items = [s["name"] for s in subs if s.get("type") == s_type and s.get("name")]
+                if items:
+                    lines.append(f"- 监控{label}：{'、'.join(items[:4])}")
+
+            # 扫描配置
+            interval = scan.get("interval_min", 0)
+            paused = scan.get("paused", False)
+            if interval:
+                status = "已暂停" if paused else "运行中"
+                lines.append(f"- 扫描频率：每 {interval} 分钟（{status}）")
+
+            if not lines:
+                return ""
+
+            return "【用户配置】\n" + "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"[Memory] 构建用户画像失败（非致命）: {e}")
+            return ""
 
     def write_from_conversation(
         self,
@@ -95,34 +124,36 @@ class AgentMemoryManager:
         owner_id: str = "",
     ):
         """
-        对话结束时调用（v2.2 per-user）：提取实体、写入 fact_memory、更新 pattern_memory、生成摘要。
+        对话结束时调用（v2.2 per-user）：提取实体、写入 fact_memory、生成摘要。
         owner_id 透传到所有 store 写入路径，避免多用户数据串读。
         """
         summary = self._summarize_conversation(messages)
-        # v2.2 P2.2：实体抽取从摘要改为原文（覆盖率大幅提升）
         entities = self._extract_entities_from_messages(messages)
         self.store.save_summary(session_id, summary, entities, outcome, owner_id)
 
-        # 4. 写入实体记忆（传 owner_id）
+        # 写入实体记忆
         for entity_text, entity_type in entities:
             self.store.upsert_entity(session_id, entity_text, entity_type, owner_id=owner_id)
 
-        # 5. 分析并写入行为模式（传 owner_id）
-        self._analyze_and_write_patterns(session_id, messages, owner_id=owner_id)
+        # 抽取并写入事实记忆（LLM 从对话中提取结构化事实）
+        self._extract_and_save_facts(session_id, messages, owner_id=owner_id)
 
-        logger.info(f"[Memory] 已写入对话 {session_id} 的记忆：{len(entities)} 个实体 (owner={owner_id[:8] if owner_id else 'legacy'})")
+        logger.info(
+            f"[Memory] 已写入对话 {session_id} 的记忆："
+            f"{len(entities)} 个实体 (owner={owner_id[:8] if owner_id else 'legacy'})"
+        )
 
     def _summarize_conversation(self, messages: List[Dict[str, str]]) -> str:
-        """LLM 生成 50 字对话摘要"""
+        """LLM 生成 200 字以内对话摘要"""
         if not messages:
             return "用户未提问"
 
         messages_text = "\n".join([
-            f"{'用户' if m['role']=='user' else '助手'}: {m['content'][:100]}"
-            for m in messages[-6:]  # 最近 6 条
+            f"{'用户' if m['role']=='user' else '助手'}: {m['content'][:200]}"
+            for m in messages[-8:]  # 最近 8 条
         ])
 
-        prompt = f"""用50字以内概括以下对话的核心意图和结果：
+        prompt = f"""用200字以内概括以下对话的核心意图、用户关注点和关键结论：
 
 {messages_text}
 
@@ -142,100 +173,107 @@ class AgentMemoryManager:
             logger.error(f"摘要生成失败: {e}")
             return f"对话包含 {len(messages)} 条消息"
 
-    def _extract_entities(self, summary: str) -> List[tuple]:
-        """
-        从摘要中提取实体（使用 jieba.posseg 替代硬编码白名单）。
-
-        词性映射：
-            nr  → person  （人名）
-            ns  → place   （地名）
-            nt  → org     （机构/团体）
-            nz  → brand   （专名/品牌）
-            其他 → 跳过
-        """
-        if not summary:
-            return []
-        try:
-            import jieba.posseg as pseg
-        except ImportError:
-            logger.warning("[Memory] jieba.posseg 不可用，跳过实体抽取")
-            return []
-
-        pos_map = {
-            "nr": "person",
-            "ns": "place",
-            "nt": "org",
-            "nz": "brand",
-            "n": "concept",  # v2.2 P2.2: 新增普通名词→概念
-        }
-        found: list = []
-        seen: set = set()
-        try:
-            for word, flag in pseg.cut(summary):
-                if len(word) < 2:
-                    continue  # 过滤单字
-                if flag in pos_map:
-                    if word in seen:
-                        continue
-                    seen.add(word)
-                    found.append((word, pos_map[flag]))
-        except Exception as e:
-            logger.warning(f"[Memory] jieba.posseg 抽取异常: {e}")
-            return []
-
-        return found
-
-    def _extract_entities_from_messages(self, messages: List[Dict[str, str]]) -> List[tuple]:
-        """
-        v2.2 P2.2：从最后 4 条 user/assistant 原文中抽取实体（覆盖率高）。
-        摘要仅用于对话标题，实体抽取不再依赖摘要。
-        """
-        if not messages:
-            return []
-        try:
-            import jieba.posseg as pseg
-        except ImportError:
-            logger.warning("[Memory] jieba.posseg 不可用，跳过实体抽取")
-            return []
-
-        pos_map = {
-            "nr": "person", "ns": "place", "nt": "org",
-            "nz": "brand", "n": "concept",
-        }
-        # 取最后 4 条 user/assistant 原文
-        relevant = [m for m in messages if m.get("role") in ("user", "assistant")][-4:]
-        full_text = " ".join(m.get("content", "") for m in relevant)
-        if not full_text.strip():
-            return []
-
-        found: list = []
-        seen: set = set()
-        try:
-            for word, flag in pseg.cut(full_text):
-                if len(word) < 2:
-                    continue
-                if flag in pos_map:
-                    if word in seen:
-                        continue
-                    seen.add(word)
-                    found.append((word, pos_map[flag]))
-        except Exception as e:
-            logger.warning(f"[Memory] 实体抽取异常: {e}")
-            return []
-        return found
-
-    def _analyze_and_write_patterns(
+    def _extract_and_save_facts(
         self,
         session_id: str,
         messages: List[Dict[str, str]],
         owner_id: str = "",
     ):
         """
-        v2.2 P2.3：模式检测已精简（保留函数签名兼容调用方，不再写入无价值数据）。
-        后续若需要行为模式，改为从 entity_memory 的 query_count 派生即可。
+        从对话中提取结构化事实（实体相关 key-value），写入 fact_memory。
+        最多取最近 6 条消息，避免长对话消耗过多 token。
         """
-        # 精简后不再写入 pattern_memory；表结构保留以备未来扩展
-        return
+        relevant = [m for m in messages if m.get("role") in ("user", "assistant")][-6:]
+        full_text = " ".join(m.get("content", "") for m in relevant)
+        if not full_text.strip():
+            return
+
+        try:
+            key, url, model = get_agent_config()
+            client = OpenAI(api_key=key, base_url=url)
+            resp = client.chat.completions.create(
+                model=model or settings.DEFAULT_MODEL,
+                messages=[{"role": "user", "content": (
+                    "从以下对话中提取可验证的事实（不包含观点、猜测）。"
+                    "返回 JSON 数组，每个元素包含：\n"
+                    "- entity: 主体名称\n"
+                    "- fact_type: 事实类型（如 preference, attribute, relationship, event）\n"
+                    "- content: 事实描述（20字以内）\n"
+                    "- confidence: 置信度 0.0-1.0\n\n"
+                    "没有可提取的事实则返回空数组。\n\n" + full_text
+                )}],
+                temperature=0.1,
+                max_tokens=500,
+                response_format={"type": "json_object"},
+            )
+            raw = resp.choices[0].message.content
+            parsed = json.loads(raw)
+            facts = parsed if isinstance(parsed, list) else parsed.get("facts", [])
+            for f in facts:
+                entity = f.get("entity", "")
+                fact_type = f.get("fact_type", "general")
+                content = f.get("content", "")
+                confidence = float(f.get("confidence", 0.6))
+                if entity and content:
+                    self.store.insert_fact(
+                        session_id, entity, fact_type, content,
+                        owner_id=owner_id, confidence=min(confidence, 1.0),
+                    )
+            if facts:
+                logger.info(f"[Memory] 已写入 {len(facts)} 条事实记忆")
+        except Exception as e:
+            logger.warning(f"[Memory] 事实抽取失败（非致命）: {e}")
+
+    def _extract_entities_from_messages(self, messages: List[Dict[str, str]]) -> List[tuple]:
+        """
+        从最后 6 条 user/assistant 原文中抽取实体。
+        优先 LLM 抽取（语义准确），LLM 失败时回退 jieba POS 标注。
+        """
+        if not messages:
+            return []
+        relevant = [m for m in messages if m.get("role") in ("user", "assistant")][-6:]
+        full_text = " ".join(m.get("content", "") for m in relevant)
+        if not full_text.strip():
+            return []
+
+        # 优先 LLM 抽取
+        try:
+            key, url, model = get_agent_config()
+            client = OpenAI(api_key=key, base_url=url)
+            resp = client.chat.completions.create(
+                model=model or settings.DEFAULT_MODEL,
+                messages=[{"role": "user", "content": (
+                    "从以下对话中提取所有重要实体（品牌、人名、产品名、公司名、事件名）。"
+                    "返回 JSON 数组，每个元素包含 name（实体名）和 type（brand|person|product|org|event）。"
+                    "不要返回不在文本中的实体。\n\n" + full_text
+                )}],
+                temperature=0.1,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
+            raw = resp.choices[0].message.content
+            parsed = json.loads(raw)
+            items = parsed if isinstance(parsed, list) else parsed.get("entities", [])
+            return [(e["name"], e["type"]) for e in items if e.get("name") and e.get("type")]
+        except Exception as e:
+            logger.warning(f"[Memory] LLM 实体抽取失败，回退 jieba: {e}")
+
+        # 回退 jieba
+        try:
+            import jieba.posseg as pseg
+        except ImportError:
+            return []
+
+        pos_map = {"nr": "person", "ns": "place", "nt": "org", "nz": "brand", "n": "concept"}
+        found, seen = [], set()
+        try:
+            for word, flag in pseg.cut(full_text):
+                if len(word) >= 2 and flag in pos_map and word not in seen:
+                    seen.add(word)
+                    found.append((word, pos_map[flag]))
+        except Exception:
+            pass
+        return found
 
     def cleanup_expired_memory(self) -> Dict[str, int]:
         """v2.2 P2.5：全表 TTL 清理，返回各表清理条数"""

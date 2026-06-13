@@ -4,16 +4,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { Plus, X, Save, Loader2, Power, PowerOff } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { radarApi, type SystemSettings } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -31,20 +23,30 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const allPlatforms = [
-  { id: 'wb', name: '微博' },
-  { id: 'xhs', name: '小红书' },
-  { id: 'bili', name: 'B站' },
-  { id: 'zhihu', name: '知乎' },
-  { id: 'dy', name: '抖音' },
-  { id: 'ks', name: '快手' },
-  { id: 'tieba', name: '百度贴吧' },
+  { id: 'wb', name: '微博', icon: 'public' },
+  { id: 'xhs', name: '小红书', icon: 'podcasts' },
+  { id: 'bili', name: 'B站', icon: 'video_library' },
+  { id: 'zhihu', name: '知乎', icon: 'newspaper' },
+  { id: 'dy', name: '抖音', icon: 'chat_bubble' },
+  { id: 'ks', name: '快手', icon: 'groups' },
+  { id: 'tieba', name: '贴吧', icon: 'share' },
+  { id: 'other', name: '其他', icon: 'grid_view' },
 ];
+
+const INPUT_CLASS =
+  'w-full px-4 py-3 rounded-lg bg-white/60 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm text-[color:var(--on-surface)] placeholder:text-[color:var(--on-surface-variant)]/40';
 
 export default function SystemSettingsPage() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['system-settings'],
     queryFn: () => radarApi.settings(),
+  });
+
+  const { data: schedStatus } = useQuery({
+    queryKey: ['scheduler-status'],
+    queryFn: () => radarApi.schedulerStatus(),
+    refetchInterval: 15_000,
   });
 
   const [keywordDraft, setKeywordDraft] = useState('');
@@ -59,12 +61,61 @@ export default function SystemSettingsPage() {
     mutationFn: (v: FormValues) => radarApi.saveSettings(v as SystemSettings),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['system-settings'] });
-      toast.success('系统设置已保存');
     },
   });
 
-  const schedulerStart = useMutation({ mutationFn: () => radarApi.schedulerStart(), onSuccess: () => toast.success('调度器已启动') });
-  const schedulerStop = useMutation({ mutationFn: () => radarApi.schedulerStop(), onSuccess: () => toast.success('调度器已停止') });
+  // Auto-save: debounce form changes by 1.5s
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watched = form.watch();
+  const freqValue = watched.monitor_frequency ?? 15;
+  const keywords = watched.keywords ?? [];
+  const inactive = watched.inactive_keywords ?? [];
+  const platforms = watched.platforms ?? [];
+  const isLoaded = useRef(false);
+
+  useEffect(() => {
+    if (!data) return;
+    // Skip the first effect run (data just populated the form)
+    if (!isLoaded.current) {
+      isLoaded.current = true;
+      return;
+    }
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      form.handleSubmit(
+        (v) => save.mutate(v),
+        () => {}, // onInvalid – no-op to avoid submitting with validation errors
+      )();
+    }, 1500);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watched]);
+
+  const schedulerStart = useMutation({
+    mutationFn: () => radarApi.schedulerStart(),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['scheduler-status'] });
+      qc.setQueryData(['scheduler-status'], (old: any) => ({ ...old, active: true }));
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['scheduler-status'] });
+      toast.success('调度器已启动');
+    },
+  });
+
+  const schedulerStop = useMutation({
+    mutationFn: () => radarApi.schedulerStop(),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['scheduler-status'] });
+      qc.setQueryData(['scheduler-status'], (old: any) => ({ ...old, active: false }));
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['scheduler-status'] });
+      toast.success('调度器已停止');
+    },
+  });
 
   if (isLoading) {
     return (
@@ -74,11 +125,6 @@ export default function SystemSettingsPage() {
       </div>
     );
   }
-
-  const watched = form.watch();
-  const keywords = watched.keywords ?? [];
-  const inactive = watched.inactive_keywords ?? [];
-  const platforms = watched.platforms ?? [];
 
   const addKeyword = () => {
     if (!keywordDraft.trim()) return;
@@ -107,99 +153,191 @@ export default function SystemSettingsPage() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* AI 助手提示 */}
-      <div className="rounded-lg border border-primary/20 bg-primary/[0.03] px-4 py-3 text-xs text-muted-foreground">
-        推荐使用{' '}
-        <a href="/agent" className="font-medium text-primary hover:underline">AI 助手</a>
-        {' '}完成日常操作——管理订阅、触发扫描、查看话题、配置推送更便捷。
-      </div>
-
-      <form onSubmit={form.handleSubmit((v) => save.mutate(v))} className="space-y-6">
-      {/* Scheduler controls */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">调度器</CardTitle>
-          <CardDescription>启动或停止 APScheduler，控制自动扫描与每日简报</CardDescription>
-        </CardHeader>
-        <CardContent className="flex gap-2">
-          <Button type="button" onClick={() => schedulerStart.mutate()} disabled={schedulerStart.isPending}>
-            <Power className="mr-2 h-4 w-4" /> 启动调度器
-          </Button>
-          <Button type="button" variant="outline" onClick={() => schedulerStop.mutate()} disabled={schedulerStop.isPending}>
-            <PowerOff className="mr-2 h-4 w-4" /> 停止调度器
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Keywords */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">监控关键词</CardTitle>
-          <CardDescription>需要重点关注的核心实体（品牌 / 产品 / 高管）</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              value={keywordDraft}
-              onChange={(e) => setKeywordDraft(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
-              placeholder="输入关键词后回车"
-            />
-            <Button type="button" onClick={addKeyword} variant="outline">
-              <Plus className="h-4 w-4" />
-            </Button>
+    <div className="max-w-[1400px] mx-auto">
+      <div className="grid grid-cols-12 gap-6">
+        {/* Card 1: Scheduler Engine */}
+        <section className="col-span-12 lg:col-span-4 glass-slab rounded-2xl p-7 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[oklch(0.78_0.16_85/0.12)] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[color:var(--primary-gold)]" style={{ fontVariationSettings: "'FILL' 1" }}>schedule</span>
+                </div>
+                <h3 className="serif-headline text-lg font-semibold text-[color:var(--on-surface)]">调度引擎</h3>
+              </div>
+              <span className={`label-caps text-[9px] px-2 py-1 rounded-full border ${schedStatus?.active ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+                {schedStatus?.active ? '运行中' : '已停止'}
+              </span>
+            </div>
+            <p className="text-sm text-[color:var(--on-surface-variant)] leading-relaxed mb-6">
+              实时处理节点，用于自动化数据采集、情感分析和话题聚类。
+            </p>
+            <div className="space-y-2 mb-6">
+              <div className="flex justify-between items-center text-xs">
+                <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70">扫描间隔</span>
+                <span className="data-mono text-[color:var(--on-surface)]">
+                  {schedStatus?.interval_hours ? `${schedStatus.interval_hours * 60} 分钟` : '--'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70">下次运行</span>
+                <span className="data-mono text-[color:var(--primary-gold)] font-semibold">
+                  {schedStatus?.next_run
+                    ? (() => {
+                        const remaining = new Date(schedStatus.next_run).getTime() - Date.now();
+                        if (remaining <= 0) return '即将执行';
+                        const min = Math.floor(remaining / 60000);
+                        const sec = Math.floor((remaining % 60000) / 1000);
+                        return `${min} 分 ${sec} 秒`;
+                      })()
+                    : '--'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70">调度器状态</span>
+                <span className="data-mono text-[color:var(--on-surface)]">
+                  {schedStatus?.active ? '活跃' : '闲置'}
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {keywords.map((k) => (
-              <Badge key={k} variant="secondary" className="gap-1 pl-3 pr-1.5">
-                {k}
-                <button type="button" onClick={() => removeKeyword(k)} className="ml-1 rounded p-0.5 hover:bg-destructive/20">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
-            {keywords.length === 0 && <span className="text-xs text-muted-foreground">暂无</span>}
+          <div className="flex flex-col gap-3">
+            {schedStatus?.active ? (
+              <button
+                type="button"
+                onClick={() => schedulerStop.mutate()}
+                disabled={schedulerStop.isPending}
+                className="w-full py-3 bg-white/40 border border-[color:var(--border-faint)] text-[color:var(--on-surface)] rounded-xl label-caps text-[11px] font-medium hover:bg-white/60 transition-all disabled:opacity-50"
+              >
+                {schedulerStop.isPending ? '停止中...' : '停止引擎'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => schedulerStart.mutate()}
+                disabled={schedulerStart.isPending}
+                className="w-full py-3 brushed-gold text-[color:var(--on-surface)] rounded-xl label-caps text-[11px] font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-lg">play_arrow</span>
+                {schedulerStart.isPending ? '启动中...' : '启动引擎'}
+              </button>
+            )}
           </div>
-          {form.formState.errors.keywords && (
-            <p className="text-xs text-destructive">{form.formState.errors.keywords.message}</p>
-          )}
+        </section>
 
-          <Separator className="my-4" />
-
-          <Label className="text-sm text-muted-foreground">停用关键词（仅记录不预警）</Label>
-          <div className="flex gap-2">
-            <Input
-              value={inactiveDraft}
-              onChange={(e) => setInactiveDraft(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addInactive())}
-              placeholder="输入停用关键词后回车"
-            />
-            <Button type="button" onClick={addInactive} variant="outline">
-              <Plus className="h-4 w-4" />
-            </Button>
+        {/* Card 2: Intelligence Keywords */}
+        <section className="col-span-12 lg:col-span-8 glass-slab rounded-2xl p-7">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[oklch(0.78_0.16_85/0.12)] flex items-center justify-center">
+                <span className="material-symbols-outlined text-[color:var(--primary-gold)]" style={{ fontVariationSettings: "'FILL' 1" }}>key</span>
+              </div>
+              <h3 className="serif-headline text-lg font-semibold text-[color:var(--on-surface)]">监控关键词</h3>
+            </div>
+            <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/60">{keywords.length} 活跃 · {inactive.length} 归档</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {inactive.map((k) => (
-              <Badge key={k} variant="outline" className="gap-1 pl-3 pr-1.5 opacity-60">
-                {k}
-                <button type="button" onClick={() => removeInactive(k)} className="ml-1 rounded p-0.5 hover:bg-destructive/20">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Platforms */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">监控平台</CardTitle>
-          <CardDescription>选择需要采集的平台</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="flex gap-2 mb-7">
+            <div className="flex-1 relative">
+              <input
+                value={keywordDraft}
+                onChange={(e) => setKeywordDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
+                placeholder="添加监控关键词..."
+                className={INPUT_CLASS}
+                type="text"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addKeyword}
+              className="w-12 h-12 brushed-gold text-[color:var(--on-surface)] rounded-lg flex items-center justify-center active:scale-[0.98] transition-all"
+            >
+              <span className="material-symbols-outlined">add</span>
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <p className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-3 tracking-[0.15em]">活跃关注</p>
+              <div className="flex flex-wrap gap-2">
+                {keywords.map((k) => (
+                  <span
+                    key={k}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[oklch(0.78_0.16_85/0.15)] text-[color:var(--on-surface)] border-[0.5px] border-[oklch(0.78_0.16_85/0.4)] text-xs font-medium"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--primary-gold)]" />
+                    {k}
+                    <button type="button" onClick={() => removeKeyword(k)} className="hover:text-red-600 transition-colors ml-1">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                    </button>
+                  </span>
+                ))}
+                {keywords.length === 0 && (
+                  <span className="text-xs text-[color:var(--on-surface-faint)]">暂无</span>
+                )}
+              </div>
+              {form.formState.errors.keywords && (
+                <p className="text-xs mt-2 text-[color:var(--status-error)]">{form.formState.errors.keywords.message}</p>
+              )}
+            </div>
+            <div>
+              <p className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-3 tracking-[0.15em]">已归档</p>
+              <div className="flex flex-wrap gap-2">
+                {inactive.map((k) => (
+                  <span
+                    key={k}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/40 border-[0.5px] border-[color:var(--border-faint)] text-[color:var(--on-surface-variant)] text-xs opacity-60"
+                  >
+                    {k}
+                    <button type="button" onClick={() => removeInactive(k)} className="hover:text-red-600 transition-colors ml-1">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                    </button>
+                  </span>
+                ))}
+                {inactive.length === 0 && (
+                  <span className="text-xs text-[color:var(--on-surface-faint)]">暂无</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Inactive keyword input */}
+          <div className="mt-6 pt-6 border-t border-[color:var(--border-faint)]">
+            <p className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-2 tracking-[0.15em]">添加归档关键词</p>
+            <div className="flex gap-2">
+              <input
+                value={inactiveDraft}
+                onChange={(e) => setInactiveDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addInactive())}
+                placeholder="添加归档关键词..."
+                className={INPUT_CLASS}
+                type="text"
+              />
+              <button
+                type="button"
+                onClick={addInactive}
+                className="w-12 h-12 bg-white/40 border border-[color:var(--border-faint)] text-[color:var(--on-surface-variant)] rounded-lg flex items-center justify-center active:scale-[0.98] transition-all"
+              >
+                <span className="material-symbols-outlined">add</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Card 3: Target Platforms */}
+        <section className="col-span-12 glass-slab rounded-2xl p-7">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[oklch(0.78_0.16_85/0.12)] flex items-center justify-center">
+                <span className="material-symbols-outlined text-[color:var(--primary-gold)]" style={{ fontVariationSettings: "'FILL' 1" }}>hub</span>
+              </div>
+              <h3 className="serif-headline text-lg font-semibold text-[color:var(--on-surface)]">目标平台</h3>
+            </div>
+            <span className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/60">{platforms.length} / {allPlatforms.length} 活跃</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             {allPlatforms.map((p) => {
               const checked = platforms.includes(p.id);
               return (
@@ -207,77 +345,156 @@ export default function SystemSettingsPage() {
                   key={p.id}
                   type="button"
                   onClick={() => togglePlatform(p.id)}
-                  className={
-                    'rounded-lg border px-3 py-2.5 text-sm font-medium transition-all ' +
-                    (checked
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border bg-muted/30 text-muted-foreground hover:bg-accent')
-                  }
+                  className={`p-4 rounded-xl flex flex-col items-center gap-2 transition-all ${
+                    checked ? 'platform-active' : 'platform-inactive'
+                  }`}
                 >
-                  {p.name}
+                  <span
+                    className="material-symbols-outlined"
+                    style={{
+                      color: checked ? 'var(--primary-gold)' : 'var(--on-surface-variant)',
+                      fontVariationSettings: checked ? "'FILL' 1" : undefined,
+                    }}
+                  >
+                    {p.icon}
+                  </span>
+                  <span
+                    className="label-caps text-[10px] tracking-[0.15em] font-semibold"
+                    style={{ color: checked ? 'var(--on-surface)' : 'var(--on-surface-variant)' }}
+                  >
+                    {p.name}
+                  </span>
                 </button>
               );
             })}
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      {/* Frequency & Schedule */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">调度参数</CardTitle>
-          <CardDescription>扫描频率与每日简报推送时间</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>扫描频率（分钟）</Label>
-            <Input
-              type="number"
-              min={5}
-              max={1440}
-              {...form.register('monitor_frequency', { valueAsNumber: true })}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>扫描起始时间</Label>
-            <Input type="time" {...form.register('start_time')} />
-          </div>
-          <div className="space-y-2">
-            <Label>每日简报推送时间</Label>
-            <Input type="time" {...form.register('push_time')} />
-          </div>
-          <div className="flex flex-col gap-3 pt-2">
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <div>
-                <Label className="text-sm">每日简报推送</Label>
-                <p className="text-xs text-muted-foreground">开启后每日定时汇总</p>
+        {/* Card 4: Operational Parameters */}
+        <section className="col-span-12 glass-slab rounded-2xl p-7">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[oklch(0.78_0.16_85/0.12)] flex items-center justify-center">
+                <span className="material-symbols-outlined text-[color:var(--primary-gold)]" style={{ fontVariationSettings: "'FILL' 1" }}>tune</span>
               </div>
-              <Switch
-                checked={watched.push_summary}
-                onCheckedChange={(v) => form.setValue('push_summary', v)}
-              />
+              <h3 className="serif-headline text-lg font-semibold text-[color:var(--on-surface)]">运营参数</h3>
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <div>
-                <Label className="text-sm">负面舆情即时告警</Label>
-                <p className="text-xs text-muted-foreground">触发后立即推送</p>
-              </div>
-              <Switch
-                checked={watched.alert_negative}
-                onCheckedChange={(v) => form.setValue('alert_negative', v)}
-              />
-            </div>
+            {save.isPending && (
+              <span className="label-caps text-[10px] text-[color:var(--primary-gold)]/70 flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm animate-spin">sync</span>
+                保存中...
+              </span>
+            )}
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={save.isPending} className="gap-2">
-          {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          保存设置
-        </Button>
+          <form>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+              {/* Scan Frequency - Range Slider */}
+              <div>
+                <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-4 block tracking-[0.15em]">扫描频率</label>
+                <div className="mb-3 flex items-baseline gap-2">
+                  <span className="serif-headline text-4xl font-semibold text-[color:var(--on-surface)] data-mono">{freqValue}</span>
+                  <span className="label-caps text-xs text-[color:var(--on-surface-variant)]">分钟</span>
+                </div>
+                <input
+                  className="w-full"
+                  max="60"
+                  min="1"
+                  type="range"
+                  value={freqValue}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    form.setValue('monitor_frequency', v, { shouldValidate: true });
+                  }}
+                />
+                <div className="flex justify-between mt-2 label-caps text-[10px] text-[color:var(--on-surface-variant)]/60 data-mono">
+                  <span>1 分</span>
+                  <span>15 分</span>
+                  <span>60 分</span>
+                </div>
+              </div>
+
+              {/* Timing Windows */}
+              <div className="space-y-4">
+                <div>
+                  <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-2 block tracking-[0.15em]">启动窗口</label>
+                  <input
+                    type="time"
+                    {...form.register('start_time')}
+                    className="w-full px-4 py-3 rounded-lg bg-white/60 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm data-mono text-[color:var(--on-surface)]"
+                  />
+                </div>
+                <div>
+                  <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-2 block tracking-[0.15em]">简报时间</label>
+                  <input
+                    type="time"
+                    {...form.register('push_time')}
+                    className="w-full px-4 py-3 rounded-lg bg-white/60 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm data-mono text-[color:var(--on-surface)]"
+                  />
+                </div>
+              </div>
+
+              {/* Notification Toggles */}
+              <div className="space-y-5">
+                {/* Daily Briefing */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-[color:var(--on-surface)]">每日简报</p>
+                    <p className="text-xs text-[color:var(--on-surface-variant)]/70 mt-0.5">每日结束时的汇总报告。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => form.setValue('push_summary', !watched.push_summary)}
+                    className={`w-11 h-6 rounded-full relative transition-all ${watched.push_summary ? 'toggle-on' : 'toggle-off'}`}
+                  >
+                    <div
+                      className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all"
+                      style={{ right: watched.push_summary ? '0.125rem' : undefined, left: watched.push_summary ? undefined : '0.125rem' }}
+                    />
+                  </button>
+                </div>
+                {/* Instant Alerts */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-[color:var(--on-surface)]">即时预警</p>
+                    <p className="text-xs text-[color:var(--on-surface-variant)]/70 mt-0.5">高优先级信号的即时推送。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => form.setValue('alert_negative', !watched.alert_negative)}
+                    className={`w-11 h-6 rounded-full relative transition-all ${watched.alert_negative ? 'toggle-on' : 'toggle-off'}`}
+                  >
+                    <div
+                      className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all"
+                      style={{ right: watched.alert_negative ? '0.125rem' : undefined, left: watched.alert_negative ? undefined : '0.125rem' }}
+                    />
+                  </button>
+                </div>
+                {/* Vision Pipeline */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-[color:var(--on-surface)]">视觉管线</p>
+                    <p className="text-xs text-[color:var(--on-surface-variant)]/70 mt-0.5">自动解析图像证据。</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="toggle-on w-11 h-6 rounded-full relative transition-all"
+                  >
+                    <div className="absolute right-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        {/* Footer status */}
+        <div className="col-span-12 flex justify-between items-center pt-4">
+          <p className="text-xs text-[color:var(--on-surface-variant)]/60 label-caps">
+            {save.isPending ? '保存中...' : '改动将自动保存'}
+          </p>
+        </div>
       </div>
-    </form>
     </div>
   );
 }

@@ -107,17 +107,19 @@ class WeiboCrawler(AbstractCrawler):
                     context_page=self.context_page,
                     cookie_str=config.COOKIES,
                 )
-                await login_obj.begin()
-
-                # After successful login, redirect to mobile website and update mobile cookies
-                utils.logger.info("[WeiboCrawler.start] redirect weibo mobile homepage and update cookies on mobile platform")
-                await self.context_page.goto(self.mobile_index_url)
-                await asyncio.sleep(3)
-                # Only get mobile cookies to avoid confusion between PC and mobile cookies
-                await self.wb_client.update_cookies(
-                    browser_context=self.browser_context,
-                    urls=[self.mobile_index_url]
-                )
+                try:
+                    await login_obj.begin()
+                    # After successful login, redirect to mobile website and update mobile cookies
+                    utils.logger.info("[WeiboCrawler.start] redirect weibo mobile homepage and update cookies on mobile platform")
+                    await self.context_page.goto(self.mobile_index_url)
+                    await asyncio.sleep(3)
+                    # Only get mobile cookies to avoid confusion between PC and mobile cookies
+                    await self.wb_client.update_cookies(
+                        browser_context=self.browser_context,
+                        urls=[self.mobile_index_url]
+                    )
+                except Exception as e:
+                    utils.logger.warning(f"[WeiboCrawler.start] login failed, continuing without login: {e}")
 
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
@@ -375,11 +377,11 @@ class WeiboCrawler(AbstractCrawler):
                     "height": 1080
                 },
                 user_agent=user_agent,
-                channel="chrome",  # Use system's Chrome stable version
+                channel="msedge",
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="msedge")  # type: ignore
             browser_context = await browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=user_agent)
             return browser_context
 

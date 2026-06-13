@@ -18,6 +18,7 @@ export type SSEEventName =
   | 'tool_progress'
   | 'tool_result'
   | 'error'
+  | 'session'
   | 'done';
 
 export interface SSEToolCall {
@@ -57,12 +58,17 @@ export interface SSEError {
 }
 
 /** 协议原文 → 解析后事件 */
+export interface SSESession {
+  session_id: string;
+}
+
 export type ParsedSSEEvent =
   | { event: 'text'; data: string }
   | { event: 'tool_call'; data: SSEToolCall }
   | { event: 'tool_progress'; data: SSEToolProgress }
   | { event: 'tool_result'; data: SSEToolResult }
   | { event: 'error'; data: SSEError }
+  | { event: 'session'; data: SSESession }
   | { event: 'done'; data: '' };
 
 /** 助手消息内嵌的工具调用单元 */
@@ -82,6 +88,16 @@ export interface UICard {
   tool: string;
 }
 
+/** 流式搜索结果的单条 */
+export interface SearchStreamItem {
+  title: string;
+  snippet: string;
+  url: string;
+  platform: string;
+  relevance?: number;
+  publish_time?: string;
+}
+
 /** 流式中的助手消息（多 block 组成） */
 export interface AssistantMessage {
   role: 'assistant';
@@ -90,4 +106,6 @@ export interface AssistantMessage {
   cards: UICard[];
   done: boolean;
   error?: string;
+  /** tool_progress 累积的实时搜索结果（tool_result 到达前） */
+  progressItems?: SearchStreamItem[];
 }

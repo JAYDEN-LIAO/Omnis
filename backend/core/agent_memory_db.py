@@ -70,7 +70,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print(f"✅ Agent 记忆库初始化完成: {AGENT_MEMORY_DB_PATH}")
+    print(f"[Agent] 记忆库初始化完成: {AGENT_MEMORY_DB_PATH}")
 
 # 启动时自动初始化
 init_db()
