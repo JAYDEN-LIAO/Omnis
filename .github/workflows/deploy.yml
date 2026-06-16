@@ -1,0 +1,57 @@
+# Omnis 自动部署 — git push 到 main 分支时触发
+name: Deploy Omnis
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ======== 前端构建 ========
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: cd frontend/web && npm ci
+
+      - name: Build frontend (static export)
+        run: cd frontend/web && STATIC_EXPORT=true npm run build
+
+      # ======== 上传前端静态文件 ========
+      - name: Upload frontend to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "frontend/web/out/*"
+          target: "/www/wwwroot/omnis.jaydennn.xyz"
+          strip_components: 3
+          rm: true
+          overwrite: true
+
+      # ======== 后端同步（git pull）+ 重启 ========
+      - name: Sync backend and restart gunicorn
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /www/wwwroot/omnis_backend
+            GIT_SSH_COMMAND="ssh -F ~/.ssh/config_omnis" git fetch origin main
+            GIT_SSH_COMMAND="ssh -F ~/.ssh/config_omnis" git reset --hard origin/main
+            # 更新依赖（仅 requirements.txt 变化时有效）
+            source venv/bin/activate
+            pip install -r requirements.txt --quiet
+            # 重启 gunicorn worker（不中断服务）
+            kill -HUP $(cat gunicorn.pid 2>/dev/null || ps aux | grep 'gunicorn.*main:app' | grep -v grep | head -1 | awk '{print $2}')
