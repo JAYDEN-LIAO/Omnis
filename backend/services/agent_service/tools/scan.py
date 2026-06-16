@@ -10,7 +10,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 from ._base import ToolResult, tool
 from ._owner import with_owner
@@ -213,3 +213,65 @@ def get_next_run_time_tool(_owner_id: str) -> str:
     return ToolResult(
         success=True, data=data, ui={"type": "scheduler_info", "data": data},
     ).to_json()
+
+
+# ── B6/B7. pause_scan / resume_scan — 爬虫采集暂停/恢复 ──
+@tool(
+    name="pause_scan",
+    description=(
+        "暂停当前正在运行的爬虫采集任务（允许当前页面完成，不再启动新页面）。"
+        "用户说'暂停/停一下/先别抓了'时调用。"
+    ),
+    parameters=None,
+    group="scan",
+)
+@with_owner
+def pause_scan_tool(_owner_id: str) -> str:
+    import asyncio
+    try:
+        from services.crawler_service.api.services import crawler_manager
+        loop = asyncio.get_event_loop()
+        ok = loop.run_until_complete(crawler_manager.pause())
+        if ok:
+            return ToolResult(
+                success=True,
+                data={"status": "paused"},
+                ui={"type": "scan_progress", "data": {"status": "paused"}},
+            ).to_json()
+        return ToolResult(
+            success=False,
+            error="爬虫不在运行中",
+            error_type="state",
+        ).to_json()
+    except Exception as e:
+        logger.error(f"[pause_scan] {e}")
+        return ToolResult(success=False, error=str(e), error_type="internal").to_json()
+
+
+@tool(
+    name="resume_scan",
+    description="恢复已暂停的爬虫采集任务。用户说'继续/恢复/接着抓'时调用。",
+    parameters=None,
+    group="scan",
+)
+@with_owner
+def resume_scan_tool(_owner_id: str) -> str:
+    import asyncio
+    try:
+        from services.crawler_service.api.services import crawler_manager
+        loop = asyncio.get_event_loop()
+        ok = loop.run_until_complete(crawler_manager.resume())
+        if ok:
+            return ToolResult(
+                success=True,
+                data={"status": "running"},
+                ui={"type": "scan_progress", "data": {"status": "running"}},
+            ).to_json()
+        return ToolResult(
+            success=False,
+            error="爬虫不在暂停状态",
+            error_type="state",
+        ).to_json()
+    except Exception as e:
+        logger.error(f"[resume_scan] {e}")
+        return ToolResult(success=False, error=str(e), error_type="internal").to_json()

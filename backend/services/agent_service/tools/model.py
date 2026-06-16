@@ -13,8 +13,8 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from core.logger import get_logger
-from core.model_config_db import (
+from backend.core.logger import get_logger
+from backend.core.model_config_db import (
     AGENT_ROLES,
     PROVIDERS,
     get_effective_config,
@@ -199,7 +199,11 @@ def test_model_tool(agent_role: str, _owner_id: str) -> str:
                 temperature=0,
                 max_tokens=8,
             )
-            sample = (resp.choices[0].message.content or "").strip()[:80]
+            if not resp.choices:
+                logger.warning("[ModelTool] LLM 返回空 choices (ping)")
+                sample = "(空响应)"
+            else:
+                sample = (resp.choices[0].message.content or "").strip()[:80]
         else:
             # EMBEDDING/VISION：只做 list models 探活（最低成本）
             # 不同 provider models endpoint 兼容性差，这里直接判 client 构造成功即视为可达

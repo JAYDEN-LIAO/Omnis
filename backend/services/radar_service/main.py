@@ -7,12 +7,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
-
-if BACKEND_DIR not in sys.path:
-    sys.path.append(BACKEND_DIR)
 
 CRAWLER_DIR = os.path.join(BACKEND_DIR, "services", "crawler_service")
 
@@ -21,12 +17,12 @@ VENV_PYTHON = os.path.join(PROJECT_ROOT, "venv", "Scripts", "python.exe")
 if not os.path.exists(VENV_PYTHON):
     VENV_PYTHON = sys.executable  # 回退到当前解释器
 
-from core.logger import get_logger
-from core.context import set_task_context
+from backend.core.logger import get_logger
+from backend.core.context import set_task_context
 
 logger = get_logger("radar.main")
-from core.config import settings
-from .db_manager import get_unprocessed_posts, mark_processed_batch, save_ai_result, get_system_settings
+from backend.core.config import settings
+from .db import get_unprocessed_posts, mark_processed_batch, save_ai_result, get_aggregated_keywords, get_aggregated_platforms
 from .schemas import ScreenerResult
 from .notifier import send_alert
 from .pipeline import RadarPipeline, PipelineConfig
@@ -102,26 +98,16 @@ def get_radar_status(owner_id: Optional[str] = None) -> RadarStatus:
 def reload_config():
     global MONITOR_KEYWORDS, MONITOR_KEYWORD_LEVELS, MONITOR_PLATFORMS, ALERT_NEGATIVE
     try:
-        conf = get_system_settings()
+        keywords = get_aggregated_keywords()
+        platforms = get_aggregated_platforms()
     except Exception:
-        conf = {} 
-        
-    MONITOR_KEYWORDS = []
-    MONITOR_KEYWORD_LEVELS = {}
-    
-    for kw in conf.get("keywords", []):
-        if isinstance(kw, str):
-            MONITOR_KEYWORDS.append(kw)
-            MONITOR_KEYWORD_LEVELS[kw] = "balanced"
-        elif isinstance(kw, dict):
-            text = kw.get("text")
-            if text:
-                MONITOR_KEYWORDS.append(text)
-                MONITOR_KEYWORD_LEVELS[text] = kw.get("level", "balanced")
-                
-    MONITOR_PLATFORMS = conf.get("platforms", [])
-    ALERT_NEGATIVE = conf.get("alert_negative", True)
-    logger.info(f"Loaded config: keywords={MONITOR_KEYWORDS}, levels={MONITOR_KEYWORD_LEVELS}")
+        keywords, platforms = [], []
+
+    MONITOR_KEYWORDS = keywords
+    MONITOR_KEYWORD_LEVELS = {kw: "balanced" for kw in keywords}
+    MONITOR_PLATFORMS = platforms
+    ALERT_NEGATIVE = True
+    logger.info(f"Loaded aggregated config: keywords={MONITOR_KEYWORDS}, platforms={MONITOR_PLATFORMS}")
 
 def run_crawler_for_platform(platform):
     logger.info(f"Starting crawler for platform: {platform.upper()}")
@@ -267,10 +253,11 @@ async def run_analysis_pipeline_async(owner_id: Optional[str] = None):
             processed_records = [(pid, platform) for pid in all_post_ids]
             mark_processed_batch(processed_records)
 
-        # 保存结果入库（WS4.6：传入 owner_id）
+        # 保存结果入库（WS4.6：传入 owner_id / P1 Fix：to_thread 避免阻塞事件循环）
         new_count = 0
         for pr in results:
-            save_ai_result(
+            await asyncio.to_thread(
+                save_ai_result,
                 post_id=pr.post_id,
                 platform=pr.platform,
                 keyword=pr.keyword,

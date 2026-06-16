@@ -14,12 +14,12 @@ from pydantic import ValidationError
 from dataclasses import dataclass
 from typing import Optional, Any
 
-from core.logger import get_logger
-from core.metrics import LLM_CALLS, LLM_LATENCY
-from core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+from backend.core.logger import get_logger
+from backend.core.metrics import LLM_CALLS, LLM_LATENCY
+from backend.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 
 logger = get_logger("radar.llm")
-from core.config import settings
+from backend.core.config import settings
 
 
 @dataclass
@@ -47,39 +47,46 @@ def get_all_breakers() -> list:
     """获取所有已知熔断器（含 Agent 诊断引擎的工具级熔断器）"""
     breakers = list(ALL_BREAKERS)
     try:
-        from services.agent_service.diagnosis.diagnosis_engine import _circuit_registry
+        from backend.services.agent_service.diagnosis.diagnosis_engine import _circuit_registry
         # diagnosis 引擎按工具名懒加载，先 ping 一下 4 个常见工具名
         # v2.2 P0#6: trigger_background_crawl 已废弃，替换为 trigger_scan（per-user）
         for tool_name in ("get_system_status", "trigger_scan", "get_recent_alerts", "llm_call"):
             breakers.append(_circuit_registry.get(tool_name))
     except Exception:
-        pass
+        pass  # 非关键路径：熔断器列表构造失败不阻塞主流程
     return breakers
 
 
-global_http_client = httpx.Client()
+global_http_client = httpx.Client(timeout=60.0)
 
 # ==========================================
-# 大模型 Client 初始化
+# 大模型 Client 初始化（延迟加载：启动时不需要 API key）
 # ==========================================
 
-deepseek_client = OpenAI(
-    api_key=settings.ANALYST_API_KEY,
-    base_url=settings.ANALYST_BASE_URL,
-    http_client=global_http_client
-)
+class _LazyOpenAI:
+    """Proxy that lazily creates the real OpenAI client on first access."""
+    def __init__(self, key_attr, url_attr):
+        self._key = key_attr
+        self._url = url_attr
+        self._client = None
 
-kimi_client = OpenAI(
-    api_key=settings.REVIEWER_API_KEY,
-    base_url=settings.REVIEWER_BASE_URL,
-    http_client=global_http_client
-)
+    def _get(self):
+        if self._client is None:
+            k = getattr(settings, self._key, None) or settings.DEFAULT_API_KEY or ""
+            u = getattr(settings, self._url, None) or settings.DEFAULT_BASE_URL or ""
+            self._client = OpenAI(api_key=k or "placeholder",
+                                  base_url=u,
+                                  http_client=global_http_client,
+                                  timeout=60.0)
+        return self._client
 
-embedding_client = OpenAI(
-    api_key=getattr(settings, "EMBEDDING_API_KEY", ""),
-    base_url=getattr(settings, "EMBEDDING_BASE_URL", ""),
-    http_client=global_http_client
-)
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+
+deepseek_client = _LazyOpenAI("ANALYST_API_KEY", "ANALYST_BASE_URL")
+kimi_client = _LazyOpenAI("REVIEWER_API_KEY", "REVIEWER_BASE_URL")
+embedding_client = _LazyOpenAI("EMBEDDING_API_KEY", "EMBEDDING_BASE_URL")
 
 
 # ==========================================
@@ -119,6 +126,9 @@ def _call_llm_inner(prompt, text, response_format, engine, pydantic_model):
         kwargs["response_format"] = {"type": "json_object"}
 
     response = active_client.chat.completions.create(**kwargs)
+    if not response.choices:
+        logger.warning(f"[{engine.upper()}] LLM 返回空 choices")
+        return LLMCallResult(success=False, error="LLM 返回空 choices")
     result = response.choices[0].message.content
 
     if response_format != "json":
@@ -135,7 +145,7 @@ def _call_llm_inner(prompt, text, response_format, engine, pydantic_model):
             validated_data = pydantic_model(**parsed_dict)
             return validated_data.model_dump()
         except ValidationError as e:
-            logger.error(f"[{engine.upper()}] Pydantic 字段校验失败: {e}")
+            logger.error(f"[{engine.upper()}] Pydantic 字段校验失败: {e}", exc_info=True)
             return LLMCallResult(success=False, error=f"Pydantic 校验失败: {e}")
 
     return parsed_dict
@@ -193,7 +203,7 @@ def call_llm(prompt, text, response_format="text", engine="deepseek", pydantic_m
         if circuit:
             circuit._on_failure()
         LLM_CALLS.labels(engine=engine, status="error").inc()
-        logger.error(f"[{engine.upper()}] LLM call failed: {e}")
+        logger.error(f"[{engine.upper()}] LLM call failed: {e}", exc_info=True)
         raise e
     finally:
         LLM_LATENCY.labels(engine=engine).observe(time.time() - start)

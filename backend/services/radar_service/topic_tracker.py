@@ -14,18 +14,12 @@
 - 两者互补，不冲突
 """
 
-import sys
-import os
 import hashlib
 import datetime
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.config import settings
-from core.logger import get_logger
-from core.qdrant_client import get_qdrant_client
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core.qdrant_client import get_qdrant_client
 
 logger = get_logger("radar.tracker")
 
@@ -125,6 +119,9 @@ def _call_topic_summary_llm(keyword: str, posts_text: str, n: int) -> str:
             temperature=0.5,
             max_tokens=300,
         )
+        if not response.choices:
+            logger.warning("[TopicTracker] LLM 返回空 choices")
+            return ""
         result = response.choices[0].message.content.strip()
         return result
     except Exception as e:
@@ -569,9 +566,10 @@ def index_or_update_topic(
 # 8. 获取话题历史（用于详情页）
 # ===========================
 
-def get_topic_history(topic_id: str, keyword: str) -> dict:
+def get_topic_history(topic_id: str, keyword: str, owner_id: str = "", is_admin: bool = False) -> dict:
     """
     根据 topic_id + keyword 查询完整话题历史。
+    Fix 2.6: 支持 owner_id 过滤；admin 可查看全部。
 
     用于前端 detail.vue 展示"话题追踪"卡片。
 
@@ -732,7 +730,7 @@ def migrate_topics_from_ai_results(limit: int = 1000) -> tuple[int, int]:
     ensure_topic_collection_exists()
 
     # 1. 读取 ai_results
-    from core.database import get_db_connection
+    from backend.core.database import get_db_connection
 
     with get_db_connection() as conn:
         conn.row_factory = sqlite3.Row

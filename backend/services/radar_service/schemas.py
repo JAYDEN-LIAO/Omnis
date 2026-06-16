@@ -35,6 +35,51 @@ class ReviewerResult(BaseModel):
     reason: str = Field(default="", description="维持或驳回的理由")
 
 
+# ============================================================
+# 多 Pipeline Screener Schema（攻略/追星/简报）
+# ============================================================
+
+
+class GuideScreenerResult(BaseModel):
+    """攻略线 Screener 返回结果"""
+    generated_title: str = Field(default="", description="标准化标题（20字内）")
+    info_type: str = Field(default="guide", description="信息类型: guide/review/comparison/experience")
+    topic: str = Field(default="", description="核心主题（如长沙旅游、AirPods实测）")
+    sentiment: str = Field(default="neutral", description="情感: positive/negative/mixed")
+    key_points: list[str] = Field(default_factory=list, description="关键信息点")
+    usefulness: int = Field(default=1, description="有用性评分 1-5")
+    is_relevant: bool = Field(default=False, description="是否相关")
+    needs_vision: bool = Field(default=False, description="是否需要看图")
+    matched_keyword: str = Field(default="", description="匹配到的关键词")
+    reason: str = Field(default="", description="判断理由")
+
+
+class CelebrityScreenerResult(BaseModel):
+    """追星线 Screener 返回结果"""
+    generated_title: str = Field(default="", description="标准化标题")
+    celebrity_name: str = Field(default="", description="明星/偶像名称")
+    event_type: str = Field(default="", description="事件类型: release/event/discussion/controversy/endorsement")
+    sentiment: str = Field(default="neutral", description="情感: positive/negative/neutral")
+    heat_score: int = Field(default=1, description="热度评分 1-10")
+    is_relevant: bool = Field(default=False, description="是否相关")
+    needs_vision: bool = Field(default=False, description="是否需要看图")
+    matched_keyword: str = Field(default="", description="匹配到的关键词")
+    reason: str = Field(default="", description="判断理由")
+
+
+class BriefingScreenerResult(BaseModel):
+    """简报线 Screener 返回结果"""
+    generated_title: str = Field(default="", description="标准化标题")
+    info_type: str = Field(default="", description="信息类型: tech/entertainment/travel/finance/other")
+    domain: str = Field(default="", description="领域标签")
+    sentiment: str = Field(default="neutral", description="情感: positive/negative/neutral")
+    abstract: str = Field(default="", description="20字摘要")
+    is_relevant: bool = Field(default=True, description="是否相关（简报线默认全收）")
+    needs_vision: bool = Field(default=False, description="是否需要看图")
+    matched_keyword: str = Field(default="", description="匹配到的关键词")
+    reason: str = Field(default="", description="判断理由")
+
+
 class RadarGraphState(TypedDict):
     """
     LangGraph 全局状态字典。

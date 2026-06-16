@@ -13,10 +13,10 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from core.logger import get_logger
-from core.model_config_db import get_effective_config
-from core.quota_db import check_quota
-from core.subscription_db import (
+from backend.core.logger import get_logger
+from backend.core.model_config_db import get_effective_config
+from backend.core.quota_db import check_quota
+from backend.core.subscription_db import (
     VALID_POLARITY,
     VALID_PUSH_MODE,
     VALID_SENSITIVITY,
@@ -355,6 +355,9 @@ def parse_intent_tool(utterance: str, _owner_id: str) -> str:
             response_format={"type": "json_object"},
             max_tokens=400,
         )
+        if not resp.choices:
+            logger.warning("[Subscription] LLM 返回空 choices (意图解析)")
+            return ToolResult(success=False, error="LLM 返回空 choices", error_type="llm_error").to_json()
         raw = resp.choices[0].message.content or "{}"
         intent = json.loads(raw)
     except Exception as e:

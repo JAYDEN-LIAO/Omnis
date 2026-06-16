@@ -116,6 +116,84 @@ SCREENER_PROMPT = """你是一个严谨的公关与舆情数据清洗专家。
 # 输出：{{"analysis_process": "内容为官方或大V的抽奖营销活动，无真实用户反馈或公众讨论。", "is_relevant": false, "matched_keyword": "特斯拉", "reason": "营销抽奖水文"}}
 # """
 
+# ============================================================
+# 多 Pipeline Screener Prompt（攻略/追星/简报）
+# ============================================================
+
+GUIDE_SCREENER_PROMPT = """你是一个攻略与体验信息筛选专家。
+目标：【{keyword}】
+任务：判断内容是否为攻略/种草/踩坑/体验分享类有效信息。
+
+【保留的信息类型】
+1. 攻略型：旅游路线、餐饮推荐、购物心得、装修经验、学习路径
+2. 体验型：探店评价、产品实测、服务体验分享
+3. 对比型：多选项分析对比（如"三亚vs海口怎么选"）
+
+【必须排除的噪音】
+1. 纯广告/营销软文（无真实体验细节）
+2. 个人情绪吐槽（无实质内容）
+3. 纯图片无文字说明
+
+输出 JSON：
+{{
+  "generated_title": "标准化标题（20字内）",
+  "info_type": "guide|review|comparison|experience",
+  "topic": "核心主题（如长沙旅游、AirPods实测）",
+  "sentiment": "positive|negative|mixed",
+  "key_points": ["关键信息点1", "关键信息点2"],
+  "usefulness": 1-5,
+  "is_relevant": true/false,
+  "needs_vision": true/false
+}}
+"""
+
+CELEBRITY_SCREENER_PROMPT = """你是一个娱乐资讯筛选专家。
+目标：【{keyword}】
+任务：判断内容是否为明星/偶像相关有效动态。
+
+【保留的信息类型】
+1. 作品发布：新歌、新剧、综艺、演唱会
+2. 公开活动：路演、采访、代言、红毯
+3. 粉丝讨论：正向安利、数据打榜
+4. 争议事件：绯闻、塌房、黑热搜
+
+【必须排除的噪音】
+1. 完全不相关的内容（同名不同人）
+2. 纯营销号复制粘贴无信息量
+3. 过度臆测无实据
+
+输出 JSON：
+{{
+  "generated_title": "标准化标题",
+  "celebrity_name": "明星姓名",
+  "event_type": "release|event|discussion|controversy|endorsement",
+  "sentiment": "positive|negative|neutral",
+  "heat_score": 1-10,
+  "is_relevant": true/false,
+  "needs_vision": true/false
+}}
+"""
+
+BRIEFING_SCREENER_PROMPT = """你是一个信息简报整理专家。
+目标：【{keyword}】
+任务：判断内容是否为值得收录的信息，并对内容进行分类打标。
+
+【收录原则】
+- 全量判定，只要与目标相关即有收录价值
+- 仅排除完全无关的噪音
+
+输出 JSON：
+{{
+  "generated_title": "标准化标题",
+  "info_type": "tech|entertainment|travel|finance|other",
+  "domain": "领域标签",
+  "sentiment": "positive|negative|neutral",
+  "abstract": "20字摘要",
+  "is_relevant": true/false,
+  "needs_vision": true/false
+}}
+"""
+
 ANALYST_PROMPT = """你是一位资深且敏锐的企业舆情风险分析师。
 目标实体：【{keyword}】
 

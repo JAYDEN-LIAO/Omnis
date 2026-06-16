@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 
 from ._base import ToolResult, tool
 from ._owner import with_owner
@@ -128,8 +128,8 @@ def get_recent_alerts(limit: int = 5, _owner_id: str = "") -> str:
 def get_system_overview_tool(_owner_id: str) -> str:
     from datetime import datetime
 
-    from core.model_config_db import AGENT_ROLES, get_effective_config
-    from core.subscription_db import count_subscriptions
+    from backend.core.model_config_db import AGENT_ROLES, get_effective_config
+    from backend.core.subscription_db import count_subscriptions
     from services.radar_service.db_manager import get_all_push_configs
     from services.radar_service.main import get_radar_status
 
@@ -310,7 +310,7 @@ def get_recent_activity_tool(_owner_id: str, minutes: int = 60) -> str:
 )
 @with_owner
 def health_check_tool(_owner_id: str) -> str:
-    from core.model_config_db import AGENT_ROLES, get_effective_config
+    from backend.core.model_config_db import AGENT_ROLES, get_effective_config
     from services.radar_service.db_manager import get_all_push_configs
 
     components = []

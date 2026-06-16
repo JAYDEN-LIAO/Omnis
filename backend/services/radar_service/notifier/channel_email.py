@@ -4,7 +4,7 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.header import Header
-from core.logger import get_logger
+from backend.core.logger import get_logger
 from .base import NotifierBase
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 

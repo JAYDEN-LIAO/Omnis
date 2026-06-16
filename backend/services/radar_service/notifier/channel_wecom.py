@@ -1,6 +1,6 @@
 # backend/services/radar_service/notifier/channel_wecom.py
 import requests
-from core.logger import get_logger
+from backend.core.logger import get_logger
 from .base import NotifierBase
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 
@@ -45,7 +45,7 @@ class WeComNotifier(NotifierBase):
                 logger.error(f"[WeCom] 发送失败: {result}")
                 return False
         except Exception as e:
-            logger.error(f"[WeCom] 发送异常: {e}")
+            logger.error(f"[WeCom] 发送异常: {e}", exc_info=True)
             return False
 
     def send_batch(self, batch: BatchAlertPayload) -> bool:
@@ -80,5 +80,5 @@ class WeComNotifier(NotifierBase):
                 logger.error(f"[WeCom] 批量发送失败: {result}")
                 return False
         except Exception as e:
-            logger.error(f"[WeCom] 批量发送异常: {e}")
+            logger.error(f"[WeCom] 批量发送异常: {e}", exc_info=True)
             return False

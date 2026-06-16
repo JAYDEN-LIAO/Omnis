@@ -2,16 +2,19 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
-from core.logger import get_logger
-from core.auth_deps import get_current_user, get_current_user_or_api_key, get_optional_user, require_admin
+from backend.core.logger import get_logger
+from backend.core.auth_deps import get_current_user, get_current_user_or_api_key, get_optional_user, require_admin, require_registered_user, can_view_all_data
 
 logger = get_logger("radar.api")
 from .db_manager import (
     get_latest_results, get_system_settings, save_system_settings,
     get_topic_summary_list, get_topic_summary_by_id, get_topic_posts,
     mark_topic_processed,
+    get_volume_stats as _db_volume_stats,
+    get_today_summary_data,
+    get_today_topics,
+    get_owner_by_rss_token,
 )
-from core.database import get_db_connection
 from .main import api_start_task, radar_status, get_radar_status, reload_config
 from typing import List, Optional, Dict, Any
 
@@ -22,9 +25,9 @@ router = APIRouter()
 # ============================================================
 
 @router.get("/api/mcp/health")
-def mcp_health_check():
+def mcp_health_check(current_user: dict = Depends(get_current_user_or_api_key)):
     """
-    MCP Server 健康检查端点
+    MCP Server 健康检查端点（v2.2 Fix 6.7：需认证）
     用于外部服务（如 MCP Server）探测 radar_service 是否可用
     """
     from .main import radar_status as _global_status
@@ -41,7 +44,7 @@ def mcp_health_check():
 # ============================================================
 
 @router.get("/api/circuit/states")
-def get_circuit_states(current_user: dict = Depends(get_current_user)):
+def get_circuit_states(current_user: dict = Depends(require_admin)):
     """
     返回所有熔断器当前状态（v2.2：需认证）
     """
@@ -59,6 +62,8 @@ def get_circuit_states(current_user: dict = Depends(get_current_user)):
 @router.post("/api/start_task")
 def start_task(background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user_or_api_key)):
     """WS4.6：扫描结果归属到当前用户（接受 JWT 或 API Key）"""
+    if current_user.get("role") == "guest":
+        return {"code": 403, "msg": "此功能需要注册账号"}
     success, msg = api_start_task(background_tasks, owner_id=current_user["id"])
     if success:
         return {"code": 200, "msg": msg}
@@ -71,15 +76,14 @@ def start_task(background_tasks: BackgroundTasks, current_user: dict = Depends(g
 # ============================================================
 
 @router.post("/api/scheduler/start")
-def start_scheduler(current_user: dict = Depends(get_current_user)):
-    """启动定时调度器（v2.2：需认证）"""
+def start_scheduler(current_user: dict = Depends(require_admin)):
     from .scheduler import scheduler_start
     success, msg = scheduler_start()
     return {"code": 200, "msg": msg} if success else {"code": 400, "msg": msg}
 
 
 @router.post("/api/scheduler/stop")
-def stop_scheduler(current_user: dict = Depends(get_current_user)):
+def stop_scheduler(current_user: dict = Depends(require_admin)):
     """停止定时调度器（v2.2：需认证）"""
     from .scheduler import scheduler_stop
     success, msg = scheduler_stop()
@@ -104,9 +108,9 @@ def api_get_radar_status(current_user: dict = Depends(get_current_user_or_api_ke
 @router.get("/api/yq_list")
 def get_yq_list(current_user: dict = Depends(get_current_user)):
     """v2.2：按 owner 过滤（需登录）"""
-    is_admin = current_user.get("role") == "admin"
-    owner_id = current_user["id"] if current_user and not is_admin else None
-    db_results = get_latest_results(limit=50, owner_id=owner_id, is_admin=is_admin)
+    can_view_all = can_view_all_data(current_user.get("role"))
+    owner_id = current_user["id"] if current_user and not can_view_all else None
+    db_results = get_latest_results(limit=50, owner_id=owner_id, is_admin=can_view_all)
     
     plat_name_map = {
         "wb": "微博",
@@ -166,8 +170,8 @@ class SettingsRequest(BaseModel):
     start_time: str = "08:00"
 
 @router.get("/api/settings")
-def api_get_settings(current_user: dict = Depends(get_current_user)):
-    data = get_system_settings()
+def api_get_settings(current_user: dict = Depends(require_registered_user)):
+    data = get_system_settings(owner_id=current_user["id"])
     # 兼容旧数据：keywords 可能是 [{"text":"...", "level":"..."}]，转成 ["..."]
     if data and "keywords" in data and isinstance(data["keywords"], list):
         data["keywords"] = [
@@ -182,13 +186,13 @@ def api_get_settings(current_user: dict = Depends(get_current_user)):
     return {"code": 200, "data": data}
 
 @router.post("/api/settings")
-def api_save_settings(req: SettingsRequest, current_user: dict = Depends(get_current_user)):
-    save_system_settings(req.model_dump())
+def api_save_settings(req: SettingsRequest, current_user: dict = Depends(require_registered_user)):
+    save_system_settings(req.model_dump(), owner_id=current_user["id"])
     reload_config()
 
     # 同步关键词到用户的订阅表，使 Agent 能通过 list_subscriptions 看到
     try:
-        from core.subscription_db import list_subscriptions as _list_subs, create_subscription as _create_sub
+        from backend.core.subscription_db import list_subscriptions as _list_subs, create_subscription as _create_sub
         existing = {s["name"] for s in _list_subs(current_user["id"])}
         for kw in req.keywords:
             kw_name = kw["text"] if isinstance(kw, dict) else str(kw)
@@ -230,8 +234,8 @@ def get_topic_list(
 
     WS4.6：无 token 视为 admin 看全部数据。
     """
-    is_admin = current_user.get("role") == "admin"
-    owner_id = current_user["id"] if current_user and not is_admin else None
+    can_view_all = can_view_all_data(current_user.get("role"))
+    owner_id = current_user["id"] if current_user and not can_view_all else None
     rows = get_topic_summary_list(
         keyword=keyword,
         platform=platform,
@@ -239,7 +243,7 @@ def get_topic_list(
         is_processed=is_processed,
         limit=limit,
         owner_id=owner_id,
-        is_admin=is_admin,
+        is_admin=can_view_all,
     )
 
     # 平台英文标识 → 中文映射
@@ -300,15 +304,15 @@ def get_topic_detail(topic_id: str, current_user: dict = Depends(get_current_use
     获取话题详情（含关联帖子列表 + 演化时间线）。
     WS4.6：无 token 视为 admin 看全部
     """
-    is_admin = current_user.get("role") == "admin"
-    owner_id = current_user["id"] if current_user and not is_admin else None
+    can_view_all = can_view_all_data(current_user.get("role"))
+    owner_id = current_user["id"] if current_user and not can_view_all else None
     # 话题聚合信息
-    summary = get_topic_summary_by_id(topic_id, owner_id=owner_id, is_admin=is_admin)
+    summary = get_topic_summary_by_id(topic_id, owner_id=owner_id, is_admin=can_view_all)
     if not summary:
         return {"code": 404, "msg": "话题不存在"}
 
     # 关联帖子列表
-    posts = get_topic_posts(topic_id, owner_id=owner_id, is_admin=is_admin)
+    posts = get_topic_posts(topic_id, owner_id=owner_id, is_admin=can_view_all)
 
     # 平台映射
     plat_name_map = {
@@ -401,7 +405,7 @@ def get_topic_detail(topic_id: str, current_user: dict = Depends(get_current_use
 
 
 @router.post("/api/topic/{topic_id}/process")
-def api_mark_topic_processed(topic_id: str, current_user: dict = Depends(get_current_user)):
+def api_mark_topic_processed(topic_id: str, current_user: dict = Depends(require_registered_user)):
     """WS4.6：标记话题为已处理（仅本人或 admin）"""
     is_admin = current_user.get("role") == "admin"
     # 先校验权限
@@ -449,12 +453,14 @@ def get_topic_evolution(keyword: str, topic_id: str = "", current_user: dict = D
     if not keyword:
         return {"code": 400, "msg": "keyword 参数必填"}
 
-    result = get_topic_history(topic_id=topic_id, keyword=keyword)
+    can_view_all = can_view_all_data(current_user.get("role"))
+    owner_id = current_user["id"] if not can_view_all else ""
+    result = get_topic_history(topic_id=topic_id, keyword=keyword, owner_id=owner_id, is_admin=can_view_all)
     return {"code": 200, "data": result}
 
 
 @router.post("/api/topic_evolution/migrate_clusters")
-def migrate_topic_clusters(limit: int = 1000, current_user: dict = Depends(get_current_user)):
+def migrate_topic_clusters(limit: int = 1000, current_user: dict = Depends(require_admin)):
     """
     将 ai_results 表中的历史数据，按 keyword 聚合后，
     批量生成 cluster_summary 并写入 topic_evolution 集合。
@@ -532,43 +538,18 @@ def get_volume_stats(keyword: str = "", current_user: dict = Depends(get_current
         }
     """
     import datetime
-    import sqlite3
 
     today = datetime.date.today()
     week_ago = today - datetime.timedelta(days=6)
-    is_admin = current_user.get("role") == "admin"
-    owner_id = current_user["id"] if current_user and not is_admin else None
+    can_view_all = can_view_all_data(current_user.get("role"))
+    owner_id = current_user["id"] if current_user and not can_view_all else None
 
-    with get_db_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if is_admin:
-            cursor.execute('''
-                SELECT DATE(create_time) as day,
-                       COUNT(*) as total_count,
-                       SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as neg_count
-                FROM ai_results
-                WHERE DATE(create_time) >= ?
-                  AND (? = '' OR keyword = ?)
-                GROUP BY DATE(create_time)
-                ORDER BY day ASC
-            ''', (week_ago.isoformat(), keyword, keyword))
-        else:
-            cursor.execute('''
-                SELECT DATE(create_time) as day,
-                       COUNT(*) as total_count,
-                       SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as neg_count
-                FROM ai_results
-                WHERE DATE(create_time) >= ?
-                  AND (? = '' OR keyword = ?)
-                  AND (owner_id = ? OR owner_id IS NULL)
-                GROUP BY DATE(create_time)
-                ORDER BY day ASC
-            ''', (week_ago.isoformat(), keyword, keyword, owner_id))
-        rows = cursor.fetchall()
+    result = _db_volume_stats(owner_id=owner_id, is_admin=can_view_all, keyword=keyword)
+    daily_rows = result["daily_rows"]
+    keyword_rows = result["keyword_rows"]
 
     # 补全7天数据（无数据的日期填0）
-    row_map = {r["day"]: r for r in rows}
+    row_map = {r["day"]: r for r in daily_rows}
     days, volumes, neg_vols = [], [], []
     cur = week_ago
     while cur <= today:
@@ -582,29 +563,9 @@ def get_volume_stats(keyword: str = "", current_user: dict = Depends(get_current
     # 按关键词拆分声量（取 Top 5 关键词，前端多线图用）
     keywords_volumes = {}
     try:
-        week_start = (today - datetime.timedelta(days=6)).isoformat()
-        if is_admin:
-            cursor.execute('''
-                SELECT keyword, DATE(create_time) as day, COUNT(*) as cnt
-                FROM ai_results
-                WHERE DATE(create_time) >= ?
-                GROUP BY keyword, DATE(create_time)
-                ORDER BY keyword, day
-            ''', (week_start,))
-        else:
-            cursor.execute('''
-                SELECT keyword, DATE(create_time) as day, COUNT(*) as cnt
-                FROM ai_results
-                WHERE DATE(create_time) >= ?
-                  AND (owner_id = ? OR owner_id IS NULL)
-                GROUP BY keyword, DATE(create_time)
-                ORDER BY keyword, day
-            ''', (week_start, owner_id))
-        kw_rows = cursor.fetchall()
-
         # 聚合成 {keyword: {day_iso: count}}
         kw_map: dict[str, dict[str, int]] = {}
-        for r in kw_rows:
+        for r in keyword_rows:
             kw_map.setdefault(r["keyword"], {})[r["day"]] = r["cnt"]
 
         # 取总量前 5 的关键词
@@ -646,158 +607,85 @@ def get_today_summary(current_user: dict = Depends(get_current_user)):
             "escalating_topics": [str, ...],
         }
     """
-    import datetime
-    import sqlite3
-
-    today = datetime.date.today().isoformat()
-    is_admin = current_user.get("role") == "admin"
+    can_view_all = can_view_all_data(current_user.get("role"))
     user_id = current_user["id"] if current_user else None
 
-    # 风险等级分布（从 topic_summary 统计）
-    risk_distribution = {"high": 0, "medium": 0, "low": 0, "pending": 0}
+    # 从 db 层获取今日聚合数据
+    summary_data = get_today_summary_data(owner_id=user_id, is_admin=can_view_all)
+    today_data = summary_data["today_data"]
+    risk_distribution = summary_data["risk_distribution"]
 
-    with get_db_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+    topics = get_today_topics(owner_id=user_id, is_admin=can_view_all, limit=5)
 
-        # 今日数据（按 owner 过滤）
-        if is_admin:
-            cursor.execute('''
-                SELECT * FROM ai_results
-                WHERE DATE(create_time) = ?
-                ORDER BY create_time DESC
-            ''', (today,))
-        else:
-            cursor.execute('''
-                SELECT * FROM ai_results
-                WHERE DATE(create_time) = ?
-                  AND (owner_id = ? OR owner_id IS NULL)
-                ORDER BY create_time DESC
-            ''', (today, user_id))
-        rows = cursor.fetchall()
-        today_data = [dict(r) for r in rows]
+    # 高风险数量（risk_level 包含 high/高 或 sentiment=negative）
+    high_risk = [r for r in today_data if "high" in str(r.get("risk_level", "")).lower() or "高" in str(r.get("risk_level", ""))]
+    high_risk_count = len(high_risk)
 
-        # 高风险数量（risk_level 包含 high/高 或 sentiment=negative）
-        high_risk = [r for r in today_data if "high" in str(r.get("risk_level", "")).lower() or "高" in str(r.get("risk_level", ""))]
-        high_risk_count = len(high_risk)
+    # 统计正负面
+    pos = sum(1 for r in today_data if r.get("sentiment", "").lower() == "positive")
+    neg = sum(1 for r in today_data if r.get("sentiment", "").lower() == "negative")
+    neu = len(today_data) - pos - neg
 
-        # 统计正负面
-        pos = sum(1 for r in today_data if r.get("sentiment", "").lower() == "positive")
-        neg = sum(1 for r in today_data if r.get("sentiment", "").lower() == "negative")
-        neu = len(today_data) - pos - neg
+    # 情感判断
+    if neg > pos and neg > neu:
+        sentiment_text = "中性偏负面"
+    elif pos > neg and pos > neu:
+        sentiment_text = "中性偏正面"
+    else:
+        sentiment_text = "中性态势"
 
-        # 情感判断
-        if neg > pos and neg > neu:
-            sentiment_text = "中性偏负面"
-        elif pos > neg and pos > neu:
-            sentiment_text = "中性偏正面"
-        else:
-            sentiment_text = "中性态势"
+    # 取监控关键词（从当前用户设置）
+    settings = get_system_settings(owner_id=current_user["id"])
+    raw = (settings.get("keywords") or [""])[0] if settings else ""
+    keyword = raw.get("text", str(raw)) if isinstance(raw, dict) else str(raw)
 
-        # 取监控关键词（从系统设置）
-        settings = get_system_settings()
-        raw = (settings.get("keywords") or [""])[0] if settings else ""
-        keyword = raw.get("text", str(raw)) if isinstance(raw, dict) else str(raw)
+    # 最热话题（post_count 最高）
+    hottest = max(topics, key=lambda x: x.get("post_count", 0)) if topics else {}
+    hottest_topic = hottest.get("topic_name", "") if hottest else ""
 
-        # 获取今日新增话题（按 last_seen 过滤今天，按 owner 过滤）
-        if is_admin:
-            cursor.execute('''
-                SELECT topic_name, risk_class, post_count, core_issue
-                FROM topic_summary
-                WHERE DATE(last_seen) = ?
-                ORDER BY risk_level DESC
-                LIMIT 5
-            ''', (today,))
-        else:
-            cursor.execute('''
-                SELECT topic_name, risk_class, post_count, core_issue
-                FROM topic_summary
-                WHERE DATE(last_seen) = ?
-                  AND (owner_id = ? OR owner_id IS NULL)
-                ORDER BY risk_level DESC
-                LIMIT 5
-            ''', (today, user_id))
-        topic_rows = cursor.fetchall()
-        topics = [dict(r) for r in topic_rows]
+    # 风险升级话题（risk_class = negative）
+    escalating = [t["topic_name"] for t in topics if t.get("risk_class") == "negative"][:3]
 
-        # 最热话题（post_count 最高）
-        hottest = max(topics, key=lambda x: x.get("post_count", 0)) if topics else {}
-        hottest_topic = hottest.get("topic_name", "") if hottest else ""
-
-        # 风险升级话题（risk_class = negative）
-        escalating = [t["topic_name"] for t in topics if t.get("risk_class") == "negative"][:3]
-
-        # AI 生成摘要（从今日数据拼摘要，调用 LLM）
-        summary = ""
-        if today_data:
-            sample = today_data[:5]
-            content_parts = []
-            for r in sample:
-                title = r.get("title", "") or ""
-                content = (r.get("content") or "")[:100]
-                if title:
-                    content_parts.append(f"标题：{title}\\n内容：{content}")
-            posts_text = "\\n---\\n".join(content_parts)
-            try:
-                from .topic_tracker import _call_topic_summary_llm
-                summary = _call_topic_summary_llm(keyword or "舆情", posts_text, len(sample))
-            except Exception as e:
-                logger.warning(f"[TodaySummary] LLM 生成摘要失败: {e}")
-
-        if not summary:
-            summary = f"今日共捕获相关讨论 {len(today_data)} 条，其中高风险 {high_risk_count} 条。"
-
-        # 风险等级分布（从 topic_summary 统计所有 active 话题）
+    # AI 生成摘要（从今日数据拼摘要，调用 LLM）
+    summary = ""
+    if today_data:
+        sample = today_data[:5]
+        content_parts = []
+        for r in sample:
+            title = r.get("title", "") or ""
+            content = (r.get("content") or "")[:100]
+            if title:
+                content_parts.append(f"标题：{title}\\n内容：{content}")
+        posts_text = "\\n---\\n".join(content_parts)
         try:
-            if is_admin:
-                cursor.execute('''
-                    SELECT
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) >= 4 THEN 1 ELSE 0 END) as high,
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) = 3 THEN 1 ELSE 0 END) as medium,
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) <= 2 THEN 1 ELSE 0 END) as low
-                    FROM topic_summary
-                    WHERE DATE(last_seen) >= ?
-                ''', (today,))
-            else:
-                cursor.execute('''
-                    SELECT
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) >= 4 THEN 1 ELSE 0 END) as high,
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) = 3 THEN 1 ELSE 0 END) as medium,
-                        SUM(CASE WHEN CAST(risk_level AS INTEGER) <= 2 THEN 1 ELSE 0 END) as low
-                    FROM topic_summary
-                    WHERE DATE(last_seen) >= ?
-                      AND (owner_id = ? OR owner_id IS NULL)
-                ''', (today, user_id))
-            dist_row = cursor.fetchone()
-            if dist_row:
-                risk_distribution = {
-                    "high": dist_row[0] or 0,
-                    "medium": dist_row[1] or 0,
-                    "low": dist_row[2] or 0,
-                }
-        except Exception:
-            pass
+            from .topic_tracker import _call_topic_summary_llm
+            summary = _call_topic_summary_llm(keyword or "舆情", posts_text, len(sample))
+        except Exception as e:
+            logger.warning(f"[TodaySummary] LLM 生成摘要失败: {e}")
 
-        # v2.2 被压住的推送数量
-        try:
-            from .db_manager import get_today_suppressed_count
-            suppressed_count = get_today_suppressed_count(owner_id=user_id, is_admin=is_admin)
-        except Exception:
-            suppressed_count = 0
+    if not summary:
+        summary = f"今日共捕获相关讨论 {len(today_data)} 条，其中高风险 {high_risk_count} 条。"
 
-        return {
-            "code": 200,
-            "data": {
-                "keyword": keyword,
-                "sentiment": sentiment_text,
-                "summary": summary,
-                "high_risk_count": high_risk_count,
-                "hottest_topic": hottest_topic,
-                "escalating_topics": escalating,
-                "risk_distribution": risk_distribution,
-                "suppressed_count": suppressed_count,
-            }
+    # v2.2 被压住的推送数量
+    try:
+        from .db_manager import get_today_suppressed_count
+        suppressed_count = get_today_suppressed_count(owner_id=user_id, is_admin=can_view_all)
+    except Exception:
+        suppressed_count = 0
+
+    return {
+        "code": 200,
+        "data": {
+            "keyword": keyword,
+            "sentiment": sentiment_text,
+            "summary": summary,
+            "high_risk_count": high_risk_count,
+            "hottest_topic": hottest_topic,
+            "escalating_topics": escalating,
+            "risk_distribution": risk_distribution,
+            "suppressed_count": suppressed_count,
         }
+    }
 
 
 # ============================================================
@@ -829,7 +717,7 @@ class PushTestRequest(BaseModel):
 
 
 @router.get("/api/push/configs")
-def get_all_push_configs(current_user: dict = Depends(get_current_user)):
+def get_all_push_configs(current_user: dict = Depends(require_registered_user)):
     """
     获取当前用户的所有推送通道的简洁配置（不含密码，v2.2 per-owner）
     """
@@ -842,7 +730,7 @@ def get_all_push_configs(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/api/push/config/{channel}")
-def get_push_config(channel: str, current_user: dict = Depends(get_current_user)):
+def get_push_config(channel: str, current_user: dict = Depends(require_registered_user)):
     """获取当前用户指定通道的完整配置（含密码）"""
     valid = [c.value for c in PushChannel]
     if channel not in valid:
@@ -856,7 +744,7 @@ def get_push_config(channel: str, current_user: dict = Depends(get_current_user)
 
 
 @router.post("/api/push/config/{channel}")
-def save_push_config(channel: str, req: PushConfigUpdateRequest, current_user: dict = Depends(get_current_user)):
+def save_push_config(channel: str, req: PushConfigUpdateRequest, current_user: dict = Depends(require_registered_user)):
     """保存当前用户的指定通道配置（v2.2 per-owner）"""
     valid = [c.value for c in PushChannel]
     if channel not in valid:
@@ -890,7 +778,7 @@ def save_push_config(channel: str, req: PushConfigUpdateRequest, current_user: d
 
 
 @router.post("/api/push/test")
-def test_push_channel(req: PushTestRequest, current_user: dict = Depends(get_current_user)):
+def test_push_channel(req: PushTestRequest, current_user: dict = Depends(require_registered_user)):
     """发送测试消息到当前用户指定的通道"""
     from .notifier import test_channel
     from .db_manager import get_push_config as _db_get
@@ -934,10 +822,10 @@ LLM_AGENTS = {
 
 
 @router.get("/api/llm/configs")
-def get_llm_configs(current_user: dict = Depends(get_current_user)):
+def get_llm_configs(current_user: dict = Depends(require_registered_user)):
     """获取当前用户所有 LLM Agent 的配置（v2.2 per-user）。
     user 未配置的角色回退到系统默认（admin 在 .env / settings 设的 DEFAULT_*）。"""
-    from core.model_config_db import get_model_config, get_effective_config
+    from backend.core.model_config_db import get_model_config, get_effective_config
 
     owner_id = current_user["id"]
     result = {}
@@ -969,9 +857,9 @@ def get_llm_configs(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/api/llm/config/{agent}")
-def update_llm_config(agent: str, req: LLMConfigUpdateRequest, current_user: dict = Depends(get_current_user)):
+def update_llm_config(agent: str, req: LLMConfigUpdateRequest, current_user: dict = Depends(require_registered_user)):
     """更新当前用户指定 Agent 的 LLM 配置（v2.2 per-user，不影响他人）。"""
-    from core.model_config_db import upsert_model_config
+    from backend.core.model_config_db import upsert_model_config
 
     if agent not in LLM_AGENTS:
         return {"code": 400, "msg": f"无效 Agent：{agent}，支持: {list(LLM_AGENTS.keys())}"}
@@ -1006,9 +894,9 @@ def update_llm_config(agent: str, req: LLMConfigUpdateRequest, current_user: dic
 
 
 @router.post("/api/llm/test/{agent}")
-def test_llm_config(agent: str, current_user: dict = Depends(get_current_user)):
+def test_llm_config(agent: str, current_user: dict = Depends(require_registered_user)):
     """测试当前用户指定 Agent 的 API 连通性（v2.2 per-user）。"""
-    from core.model_config_db import get_effective_config
+    from backend.core.model_config_db import get_effective_config
 
     if agent not in LLM_AGENTS:
         return {"code": 400, "msg": f"无效 Agent：{agent}"}
@@ -1055,22 +943,8 @@ def rss_feed(token: str, request: Request):
     根据 token 查找对应用户的推送配置，
     生成该用户订阅话题的 RSS XML。
     """
-    from .db_manager import _ensure_push_settings_table
-    from core.database import get_db_connection
-    import sqlite3
-
     # 查找 token 对应的 owner_id
-    _ensure_push_settings_table()
-    owner_id = None
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT owner_id FROM push_settings WHERE channel = 'rss' AND config_json LIKE ?",
-            (f'%{token}%',),
-        )
-        row = cursor.fetchone()
-        if row:
-            owner_id = row[0]
+    owner_id = get_owner_by_rss_token(token)
 
     if not owner_id:
         logger.warning(f"[RSS] 无效 token: {token[:10]}...")

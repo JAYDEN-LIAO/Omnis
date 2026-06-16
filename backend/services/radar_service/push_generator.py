@@ -11,8 +11,8 @@ import json
 import datetime
 from typing import Optional
 
-from core.logger import get_logger
-from core.sanitize import sanitize_email_field, sanitize_url
+from backend.core.logger import get_logger
+from backend.core.sanitize import sanitize_email_field, sanitize_url
 
 logger = get_logger("radar.push_generator")
 
@@ -27,151 +27,20 @@ PLATFORM_MAP = {"wb": "微博", "xhs": "小红书", "bili": "B站", "zhihu": "�
 PLATFORM_EMOJI_MAP = {"wb": "📱 微博", "xhs": "📕 小红书", "bili": "📺 B站", "zhihu": "💬 知乎",
                       "dy": "🎵 抖音", "ks": "🎬 快手", "tieba": "💬 贴吧"}
 
+# Template loader (Fix P3.3: HTML 模板外置)
+import os as _os
+_TEMPLATE_DIR = _os.path.join(_os.path.dirname(__file__), "templates")
+
+def _load_template(name: str) -> str:
+    """加载 HTML 模板文件"""
+    with open(_os.path.join(_TEMPLATE_DIR, name), "r", encoding="utf-8") as f:
+        return f.read()
+
 # ============================================================
 # 固定 HTML 模板（简约高级，支持基础交互）
 # ============================================================
 
-PUSH_HTML_TEMPLATE = """
-<!-- MediaRadar 舆情预警邮件 -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0"
-       style="max-width:620px;margin:0 auto;font-family:'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;
-              background:#e8ecf1;">
-  <!-- 顶部深色标题栏 -->
-  <tr>
-    <td style="padding:0;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr>
-          <td style="padding:28px 32px 24px 32px;background:{banner_bg};">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <!-- 左侧风险标签 -->
-                <td style="vertical-align:middle;padding-right:16px;">
-                  <span style="display:inline-block;padding:4px 10px;background:rgba(255,255,255,0.15);
-                               border-radius:4px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.9);
-                               letter-spacing:0.5px;border:1px solid rgba(255,255,255,0.2);">
-                    {banner_icon}&nbsp;{banner_label}
-                  </span>
-                </td>
-                <td align="right" style="vertical-align:middle;">
-                  <span style="font-size:11px;color:rgba(255,255,255,0.45);letter-spacing:0.5px;">{generated_date}</span>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-
-  <!-- 主内容区 -->
-  <tr>
-    <td style="padding:0 20px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"
-             style="background:#ffffff;border-radius:0 0 14px 14px;">
-
-        <!-- 关键词标题 -->
-        <tr>
-          <td style="padding:28px 20px 4px 20px;">
-            <p style="margin:0;font-size:24px;font-weight:700;color:#0d1b2a;line-height:1.35;letter-spacing:-0.3px;">
-              {keyword}
-            </p>
-          </td>
-        </tr>
-
-        <!-- 统计卡片行 -->
-        <tr>
-          <td style="padding:0 20px;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0"
-                   style="margin-top:14px;border-collapse:separate;border-spacing:0 6px;">
-              <tr>
-                <td width="33%" style="background:#f4f7fb;padding:14px 12px 12px;border-radius:8px;">
-                  <p style="margin:0 0 3px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">涉及平台</p>
-                  <p style="margin:0;font-size:14px;font-weight:600;color:#1a2c3d;">{platform}</p>
-                </td>
-                <td width="6"></td>
-                <td width="33%" style="background:#f4f7fb;padding:14px 12px 12px;border-radius:8px;">
-                  <p style="margin:0 0 3px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">风险等级</p>
-                  <p style="margin:0;font-size:14px;font-weight:700;color:{risk_color};">{risk_label}</p>
-                </td>
-                <td width="6"></td>
-                <td width="33%" style="background:#f4f7fb;padding:14px 12px 12px;border-radius:8px;">
-                  <p style="margin:0 0 3px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">相关帖子</p>
-                  <p style="margin:0;font-size:14px;font-weight:600;color:#1a2c3d;">{post_count} 条</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-
-        <!-- 分隔线 -->
-        <tr>
-          <td style="padding:20px 20px 0;">
-            <tr><td style="height:1px;background:#e4eaf2;"></td></tr>
-          </td>
-        </tr>
-
-        <!-- 核心问题（折叠交互） -->
-        <tr>
-          <td style="padding:0 20px;">
-            <details style="display:block;margin-top:0;" open>
-              <summary style="cursor:pointer;user-select:none;padding:16px 0 14px;
-                               list-style:none;border-bottom:1px solid #e4eaf2;">
-                <span style="font-size:12px;font-weight:600;color:#0d1b2a;letter-spacing:0.3px;">核心问题</span>
-                <span id="arrow_core" style="float:right;font-size:11px;color:#8a9aaa;transition:transform 0.2s;">▼</span>
-              </summary>
-              <div style="padding:16px 0;background:#f0f5fb;border-radius:8px;margin-bottom:10px;">
-                <p style="margin:0;font-size:14px;color:#2d3f52;line-height:1.9;">{core_issue}</p>
-              </div>
-            </details>
-          </td>
-        </tr>
-
-        <!-- 预警简报（折叠交互） -->
-        <tr>
-          <td style="padding:0 20px;">
-            <details style="display:block;" open>
-              <summary style="cursor:pointer;user-select:none;padding:14px 0;
-                               list-style:none;border-bottom:1px solid #e4eaf2;">
-                <span style="font-size:12px;font-weight:600;color:#0d1b2a;letter-spacing:0.3px;">预警简报</span>
-                <span style="float:right;font-size:11px;color:#8a9aaa;">▼</span>
-              </summary>
-              <div style="padding:16px 0;background:#eef2f7;border-radius:8px;margin-bottom:10px;">
-                <p style="margin:0;font-size:13px;color:#2d3f52;line-height:2;white-space:pre-wrap;">{report}</p>
-              </div>
-            </details>
-          </td>
-        </tr>
-
-        <!-- 溯源链接（折叠交互） -->
-        <tr>
-          <td style="padding:0 20px 20px;">
-            <details style="display:block;">
-              <summary style="cursor:pointer;user-select:none;padding:14px 0;
-                               list-style:none;">
-                <span style="font-size:12px;font-weight:600;color:#0d1b2a;letter-spacing:0.3px;">溯源链接&nbsp;<span style="font-weight:400;color:#8a9aaa;">({link_count})</span></span>
-                <span style="float:right;font-size:11px;color:#8a9aaa;">▶</span>
-              </summary>
-              <div style="padding:12px 0;background:#f4f7fb;border-radius:8px;">
-                {link_items}
-              </div>
-            </details>
-          </td>
-        </tr>
-
-      </table>
-    </td>
-  </tr>
-
-  <!-- 底部 -->
-  <tr>
-    <td style="padding:20px 20px 28px;">
-      <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
-        MediaRadar · 舆情监测系统 · {generated_time}
-      </p>
-    </td>
-  </tr>
-</table>
-"""
+PUSH_HTML_TEMPLATE = _load_template("push_alert.html")
 
 
 def _build_link_items(urls: list[str]) -> str:
@@ -358,143 +227,11 @@ async def generate_push_data(
 # 每日简报 HTML 模板（汇报 + 回顾风格，区别于预警模板）
 # ============================================================
 
-DAILY_SUMMARY_TEMPLATE = """
-<!-- MediaRadar 每日舆情简报 -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0"
-       style="max-width:620px;margin:0 auto;font-family:'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;
-              background:#e8ecf1;">
-  <!-- 顶部深色标题栏 -->
-  <tr>
-    <td style="padding:0;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr>
-          <td style="padding:28px 32px 24px 32px;background:#0d1b2a;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td style="vertical-align:middle;padding-right:16px;">
-                  <span style="display:inline-block;padding:4px 10px;background:rgba(255,255,255,0.12);
-                               border-radius:4px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.85);
-                               letter-spacing:0.5px;border:1px solid rgba(255,255,255,0.18);">
-                    每日舆情简报
-                  </span>
-                </td>
-                <td align="right" style="vertical-align:middle;">
-                  <span style="font-size:11px;color:rgba(255,255,255,0.45);letter-spacing:0.5px;">{report_date}</span>
-                </td>
-              </tr>
-              <tr>
-                <td colspan="2" style="padding-top:16px;">
-                  <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;line-height:1.3;letter-spacing:-0.2px;">
-                    {keyword_count} 个关键词 · 共 {total_count} 条舆情
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+DAILY_SUMMARY_TEMPLATE = _load_template("daily_summary.html")
 
-  <!-- 主内容区 -->
-  <tr>
-    <td style="padding:0 20px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"
-             style="background:#ffffff;border-radius:0 0 14px 14px;">
+DAILY_KEYWORD_BLOCK_TEMPLATE = _load_template("daily_keyword_block.html")
 
-        <!-- 今日概览统计行 -->
-        <tr>
-          <td style="padding:24px 20px 0;">
-            <table width="100%" cellpadding="0" cellspacing="0" border="0"
-                   style="border-collapse:separate;border-spacing:0 6px;">
-              <tr>
-                <td width="33%" style="background:#f4f7fb;padding:16px 12px 14px;border-radius:8px;text-align:center;">
-                  <p style="margin:0 0 4px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">今日新增</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#0d1b2a;">{total_count}</p>
-                  <p style="margin:0;font-size:10px;color:#8a9aaa;">条</p>
-                </td>
-                <td width="6"></td>
-                <td width="33%" style="background:#f4f7fb;padding:16px 12px 14px;border-radius:8px;text-align:center;">
-                  <p style="margin:0 0 4px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">高危</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#c0392b;">{high_count}</p>
-                  <p style="margin:0;font-size:10px;color:#8a9aaa;">条</p>
-                </td>
-                <td width="6"></td>
-                <td width="33%" style="background:#f4f7fb;padding:16px 12px 14px;border-radius:8px;text-align:center;">
-                  <p style="margin:0 0 4px;font-size:10px;color:#8a9aaa;letter-spacing:0.8px;text-transform:uppercase;">涉及平台</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#0d1b2a;">{platform_count}</p>
-                  <p style="margin:0;font-size:10px;color:#8a9aaa;">个</p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-
-        <!-- 分隔线 -->
-        <tr>
-          <td style="padding:20px 20px 0;">
-            <tr><td style="height:1px;background:#e4eaf2;"></td></tr>
-          </td>
-        </tr>
-
-        <!-- 关键词分块列表 -->
-        {keyword_blocks}
-
-        <!-- AI 总结区块 -->
-        <tr>
-          <td style="padding:0 20px;">
-            <details style="display:block;" open>
-              <summary style="cursor:pointer;user-select:none;padding:16px 0 14px;
-                               list-style:none;border-bottom:1px solid #e4eaf2;">
-                <span style="font-size:12px;font-weight:600;color:#0d1b2a;letter-spacing:0.3px;">📋 AI 舆情总结</span>
-                <span style="float:right;font-size:11px;color:#8a9aaa;">▼</span>
-              </summary>
-              <div style="padding:16px 0;background:#f0f5fb;border-radius:8px;margin-bottom:14px;">
-                <p style="margin:0;font-size:14px;color:#2d3f52;line-height:2;white-space:pre-wrap;">{ai_summary}</p>
-              </div>
-            </details>
-          </td>
-        </tr>
-
-      </table>
-    </td>
-  </tr>
-
-  <!-- 底部 -->
-  <tr>
-    <td style="padding:20px 20px 28px;">
-      <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
-        MediaRadar · 舆情监测系统 · {generated_time}
-      </p>
-    </td>
-  </tr>
-</table>
-"""
-
-DAILY_KEYWORD_BLOCK_TEMPLATE = """
-        <!-- 关键词块 -->
-        <tr>
-          <td style="padding:0 20px;">
-            <details style="display:block;" {block_open}>
-              <summary style="cursor:pointer;user-select:none;padding:14px 0;
-                               list-style:none;border-bottom:1px solid #e4eaf2;">
-                <span style="font-size:12px;font-weight:600;color:#0d1b2a;letter-spacing:0.3px;">{keyword_label}</span>
-                <span style="float:right;font-size:11px;color:#8a9aaa;">{risk_label}&nbsp;▼</span>
-              </summary>
-              <div style="padding:14px 0;background:#f4f7fb;border-radius:8px;margin-bottom:10px;">
-                <p style="margin:0;font-size:13px;color:#2d3f52;line-height:1.9;padding:0 12px;">{issue_summary}</p>
-                {link_section}
-              </div>
-            </details>
-          </td>
-        </tr>
-"""
-
-DAILY_LINK_ITEM_TEMPLATE = """
-                <p style="margin:0 12px 6px;font-size:12px;line-height:1.5;">
-                  <a href="{url}" style="color:#1a3a5c;text-decoration:none;">{platform_icon} {platform_name} · 查看原文 →</a>
-                </p>
-"""
+DAILY_LINK_ITEM_TEMPLATE = _load_template("daily_link_item.html")
 
 
 def _build_daily_keyword_block(keyword: str, items: list, index: int, owner_id: Optional[str] = None) -> str:
@@ -561,7 +298,7 @@ def _build_daily_keyword_block(keyword: str, items: list, index: int, owner_id: 
                         link_items.append(DAILY_LINK_ITEM_TEMPLATE.format(
                             url=url, platform_icon="🔗", platform_name=pname))
         except Exception:
-            pass
+            pass  # 每日简报链接提取非关键路径，失败时显示"暂无链接"
     link_html = "".join(link_items) if link_items else '<p style="margin:0 12px 6px;font-size:12px;color:#8a9aaa;">暂无帖子链接</p>'
 
     return DAILY_KEYWORD_BLOCK_TEMPLATE.format(
@@ -720,175 +457,11 @@ async def _generate_daily_summary_text(raw_items: list, keyword_groups: dict) ->
 # 话题级推送模板（v2.2）
 # ============================================================
 
-TOPIC_PUSH_HTML_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>话题推送 - MediaRadar</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f2f5;padding:16px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+TOPIC_PUSH_HTML_TEMPLATE = _load_template("topic_push.html")
 
-          <!-- 话题标题栏 -->
-          <tr>
-            <td style="padding:20px 24px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="vertical-align:middle;">
-                    <h2 style="margin:0;font-size:18px;font-weight:700;color:#0d1b2a;">{topic_name}</h2>
-                  </td>
-                  <td align="right" style="vertical-align:middle;">
-                    <span style="display:inline-block;padding:3px 10px;background:{risk_bg};color:#fff;
-                                 border-radius:4px;font-size:11px;font-weight:600;">{risk_label}</span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+TOPIC_BATCH_HTML_TEMPLATE = _load_template("topic_batch.html")
 
-          <!-- 热度指标 -->
-          <tr>
-            <td style="padding:0 24px 16px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:18px;font-weight:700;color:#0d1b2a;">{post_count}</div>
-                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">相关讨论</div>
-                  </td>
-                  <td width="6"></td>
-                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:18px;font-weight:700;color:#0d1b2a;">{platform_count}</div>
-                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">涉及平台</div>
-                  </td>
-                  <td width="6"></td>
-                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:18px;font-weight:700;color:{heat_color};">{heat_pct}</div>
-                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">热度变化</div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- 摘要 -->
-          <tr>
-            <td style="padding:0 24px 16px;">
-              <div style="background:#f4f7fb;border-radius:8px;padding:14px 16px;">
-                <p style="margin:0;font-size:13px;color:#2d3f52;line-height:1.7;">{summary}</p>
-              </div>
-            </td>
-          </tr>
-
-          <!-- 核心问题（折叠） -->
-          <tr>
-            <td style="padding:0 24px;">
-              <details style="display:block;">
-                <summary style="cursor:pointer;user-select:none;padding:10px 0;list-style:none;border-top:1px solid #eee;">
-                  <span style="font-size:12px;font-weight:600;color:#0d1b2a;">核心问题</span>
-                  <span style="float:right;font-size:11px;color:#8a9aaa;">▼</span>
-                </summary>
-                <div style="padding:10px 0 14px;font-size:13px;color:#555;line-height:1.6;">
-                  {core_issue}
-                </div>
-              </details>
-            </td>
-          </tr>
-
-          <!-- 帖子链接 -->
-          <tr>
-            <td style="padding:0 24px 20px;">
-              <details style="display:block;">
-                <summary style="cursor:pointer;user-select:none;padding:10px 0;list-style:none;border-top:1px solid #eee;">
-                  <span style="font-size:12px;font-weight:600;color:#0d1b2a;">溯源链接 ({link_count})</span>
-                  <span style="float:right;font-size:11px;color:#8a9aaa;">▶</span>
-                </summary>
-                <div style="padding:10px 0 0;">
-                  {link_items}
-                </div>
-              </details>
-            </td>
-          </tr>
-
-          <!-- 底部 -->
-          <tr>
-            <td style="padding:16px 24px 20px;border-top:1px solid #eee;">
-              <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
-                MediaRadar · 媒体信息订阅 · {generated_time}
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
-
-TOPIC_BATCH_HTML_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>话题推送 - MediaRadar</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f2f5;padding:16px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-
-          <!-- 顶部标题 -->
-          <tr>
-            <td style="background:#0d1b2a;padding:20px 24px;">
-              <h1 style="margin:0;font-size:18px;color:#fff;font-weight:700;">MediaRadar 话题推送</h1>
-              <p style="margin:6px 0 0;font-size:12px;color:rgba(255,255,255,0.6);">
-                共 {topic_count} 个话题更新 · {generated_time}
-              </p>
-            </td>
-          </tr>
-
-          <!-- 话题列表 -->
-          {topic_items}
-
-          <!-- 底部 -->
-          <tr>
-            <td style="padding:16px 24px 20px;border-top:1px solid #eee;">
-              <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
-                MediaRadar · 媒体信息订阅
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
-
-TOPIC_BATCH_ITEM_TEMPLATE = """
-          <tr>
-            <td style="padding:16px 24px;border-bottom:1px solid #eee;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td>
-                    <h3 style="margin:0;font-size:15px;color:#0d1b2a;font-weight:600;">{topic_name}</h3>
-                  </td>
-                  <td align="right">
-                    <span style="display:inline-block;padding:2px 8px;background:{risk_bg};color:#fff;
-                                 border-radius:3px;font-size:10px;font-weight:600;">{risk_label}</span>
-                  </td>
-                </tr>
-              </table>
-              <div style="margin-top:8px;font-size:11px;color:#7f8c8d;">
-                {post_count} 条讨论 · {platform_count} 个平台 · 热度 {heat_pct}
-              </div>
-              <p style="margin:6px 0 0;font-size:13px;color:#555;line-height:1.6;">{summary}</p>
-            </td>
-          </tr>"""
+TOPIC_BATCH_ITEM_TEMPLATE = _load_template("topic_batch_item.html")
 
 
 def generate_topic_push_html(topic_data: dict) -> str:
@@ -1022,77 +595,7 @@ async def generate_push_html(
 # 批量预警 HTML 模板
 # ============================================================
 
-BATCH_PUSH_HTML_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>舆情预警报告</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f2f5;padding:20px 0;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-
-          <!-- 顶部 Banner -->
-          <tr>
-            <td style="background:{banner_bg};padding:24px 28px;">
-              <h1 style="margin:0;font-size:20px;color:#fff;font-weight:bold;">
-                【舆情预警】{keyword} 监控报告
-              </h1>
-              <p style="margin:8px 0 0;font-size:13px;color:rgba(255,255,255,0.8);">
-                共检测到 <strong style="color:#fff">{alert_count}</strong> 条风险舆情
-              </p>
-            </td>
-          </tr>
-
-          <!-- 统计摘要 -->
-          <tr>
-            <td style="padding:20px 28px 0;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td width="33%" style="text-align:center;padding:12px 8px;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:22px;font-weight:bold;color:#c0392b;">{critical_count}</div>
-                    <div style="font-size:12px;color:#7f8c8d;margin-top:4px;">极高风险</div>
-                  </td>
-                  <td width="33%" style="text-align:center;padding:12px 8px;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:22px;font-weight:bold;color:#e67e22;">{high_count}</div>
-                    <div style="font-size:12px;color:#7f8c8d;margin-top:4px;">高风险</div>
-                  </td>
-                  <td width="33%" style="text-align:center;padding:12px 8px;background:#f8f9fa;border-radius:6px;">
-                    <div style="font-size:22px;font-weight:bold;color:#2471a3;">{medium_count}</div>
-                    <div style="font-size:12px;color:#7f8c8d;margin-top:4px;">中风险</div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- 分隔线 -->
-          <tr>
-            <td style="padding:16px 28px 0;">
-              <div style="border-bottom:1px solid #eee;"></div>
-            </td>
-          </tr>
-
-          <!-- 舆情列表 -->
-          {alert_items}
-
-          <!-- 底部 -->
-          <tr>
-            <td style="padding:20px 28px 28px;">
-              <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
-                MediaRadar · 舆情监测系统 · {generated_time}
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
+BATCH_PUSH_HTML_TEMPLATE = _load_template("batch_alert.html")
 
 
 def _build_batch_alert_item_html(index: int, alert, risk_colors: dict) -> str:

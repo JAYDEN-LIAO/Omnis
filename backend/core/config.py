@@ -13,54 +13,72 @@ if not os.path.exists(DATA_DIR):
 ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 load_dotenv(dotenv_path=ENV_PATH)
 
+
 class Settings:
     # ======== 默认模型配置（所有 Agent 的兜底配置）=======
-    # v2.2 P1#24: 优先读 DEFAULT_*，空值时回退到 LLM_*（旧 .env 兼容）
-    _def_api_key = os.getenv("DEFAULT_API_KEY", "")
-    if not _def_api_key:
-        _def_api_key = os.getenv("LLM_API_KEY", "")
+    _def_api_key = (os.getenv("DEFAULT_API_KEY", "") or ""
+                    or os.getenv("LLM_API_KEY", ""))
     DEFAULT_API_KEY = _def_api_key
 
-    _def_base_url = os.getenv("DEFAULT_BASE_URL", "").strip()
-    if not _def_base_url:
-        _def_base_url = os.getenv("LLM_BASE_URL", "").strip()
-    if not _def_base_url:
-        _def_base_url = "https://api.deepseek.com/v1"
+    _def_base_url = (os.getenv("DEFAULT_BASE_URL", "").strip()
+                     or os.getenv("LLM_BASE_URL", "").strip()
+                     or "https://api.deepseek.com/v1")
     DEFAULT_BASE_URL = _def_base_url
 
-    _def_model = os.getenv("DEFAULT_MODEL", "")
-    if not _def_model:
-        _def_model = os.getenv("LLM_MODEL", "")
-    if not _def_model:
-        _def_model = "deepseek-chat"
+    _def_model = (os.getenv("DEFAULT_MODEL", "")
+                  or os.getenv("LLM_MODEL", "")
+                  or "deepseek-chat")
     DEFAULT_MODEL = _def_model
 
-    # ======== 配置1: 分析员 Agent ========
-    ANALYST_API_KEY = os.getenv("ANALYST_API_KEY", "")
-    ANALYST_BASE_URL = os.getenv("ANALYST_BASE_URL", "").strip()
-    ANALYST_MODEL = os.getenv("ANALYST_MODEL", "").strip()
+    # ======== 配置1: 分析员 Agent（回退: ANALYST → DEFAULT）========
+    _analyst_api_key = os.getenv("ANALYST_API_KEY", "") or _def_api_key
+    ANALYST_API_KEY = _analyst_api_key
+    _analyst_base_url = os.getenv("ANALYST_BASE_URL", "").strip() or _def_base_url
+    ANALYST_BASE_URL = _analyst_base_url
+    _analyst_model = os.getenv("ANALYST_MODEL", "").strip() or _def_model
+    ANALYST_MODEL = _analyst_model
 
-    # ======== 配置2: 复核员 Agent ========
-    REVIEWER_API_KEY = os.getenv("REVIEWER_API_KEY", "")
-    REVIEWER_BASE_URL = os.getenv("REVIEWER_BASE_URL", "").strip()
-    REVIEWER_MODEL = os.getenv("REVIEWER_MODEL", "").strip()
+    # ======== 配置2: 复核员 Agent（回退: REVIEWER → DEFAULT）========
+    _reviewer_api_key = os.getenv("REVIEWER_API_KEY", "") or _def_api_key
+    REVIEWER_API_KEY = _reviewer_api_key
+    _reviewer_base_url = os.getenv("REVIEWER_BASE_URL", "").strip() or _def_base_url
+    REVIEWER_BASE_URL = _reviewer_base_url
+    _reviewer_model = os.getenv("REVIEWER_MODEL", "").strip() or _def_model
+    REVIEWER_MODEL = _reviewer_model
 
-    # ======== Agent 智能体（分析/对话助手） ========
-    AGENT_API_KEY = os.getenv("AGENT_API_KEY", "").strip()
-    AGENT_BASE_URL = os.getenv("AGENT_BASE_URL", "").strip()
-    AGENT_MODEL = os.getenv("AGENT_MODEL", "").strip()
+    # ======== Agent 智能体（回退: AGENT → ANALYST → DEFAULT）========
+    _agent_api_key = os.getenv("AGENT_API_KEY", "").strip() or _analyst_api_key
+    AGENT_API_KEY = _agent_api_key
+    _agent_base_url = os.getenv("AGENT_BASE_URL", "").strip() or _analyst_base_url
+    AGENT_BASE_URL = _agent_base_url
+    _agent_model = os.getenv("AGENT_MODEL", "").strip() or _analyst_model
+    AGENT_MODEL = _agent_model
 
-    # ======== 配置3: 向量引擎 ========
-    EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
-    EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "").strip()
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "").strip()
+    # ======== 配置3: 向量引擎（回退: EMBEDDING → DEFAULT）========
+    _emb_api_key = os.getenv("EMBEDDING_API_KEY", "") or _def_api_key
+    EMBEDDING_API_KEY = _emb_api_key
+    _emb_base_url = os.getenv("EMBEDDING_BASE_URL", "").strip() or _def_base_url
+    EMBEDDING_BASE_URL = _emb_base_url
+    _emb_model = os.getenv("EMBEDDING_MODEL", "").strip() or _def_model
+    EMBEDDING_MODEL = _emb_model
 
-    # ======== 配置4: 视觉引擎 ========
-    VISION_API_KEY = os.getenv("VISION_API_KEY", "")
-    VISION_BASE_URL = os.getenv("VISION_BASE_URL", "").strip()
-    VISION_MODEL = os.getenv("VISION_MODEL", "").strip()
+    # ======== 配置4: 视觉引擎（回退: VISION → DEFAULT）========
+    _vis_api_key = os.getenv("VISION_API_KEY", "") or _def_api_key
+    VISION_API_KEY = _vis_api_key
+    _vis_base_url = os.getenv("VISION_BASE_URL", "").strip() or _def_base_url
+    VISION_BASE_URL = _vis_base_url
+    _vis_model = os.getenv("VISION_MODEL", "").strip() or _def_model
+    VISION_MODEL = _vis_model
 
-    # ======== 配置5: Qdrant 向量数据库（RAG 知识库） ========
+    # ======== 配置5: 多 Pipeline 模型配置 ========
+    _guide_model = os.getenv("GUIDE_MODEL", "").strip() or _def_model
+    GUIDE_MODEL = _guide_model
+    _celebrity_model = os.getenv("CELEBRITY_MODEL", "").strip() or _def_model
+    CELEBRITY_MODEL = _celebrity_model
+    _briefing_model = os.getenv("BRIEFING_MODEL", "").strip() or _def_model
+    BRIEFING_MODEL = _briefing_model
+
+    # ======== 配置6: Qdrant 向量数据库（RAG 知识库） ========
     QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
     QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "yq_history")
@@ -98,10 +116,13 @@ class Settings:
     JWT_SECRET = _raw_jwt_secret.strip() if _raw_jwt_secret else ""
     JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256").strip()
     JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
-    # v2.2 P1#14：refresh token 有效期（默认 7 天）。仅用于换 access token，不直接鉴权 API。
     JWT_REFRESH_EXPIRE_HOURS = int(os.getenv("JWT_REFRESH_EXPIRE_HOURS", "168"))
 
-    # ======== OAuth 配置（v2 上线时填真实值）=======
+    # ======== 游客访问配置 ========
+    GUEST_TOKEN_EXPIRE_HOURS = int(os.getenv("GUEST_TOKEN_EXPIRE_HOURS", "2"))
+    GUEST_RATE_LIMIT = int(os.getenv("GUEST_RATE_LIMIT", "20"))
+
+    # ======== OAuth 配置 ========
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
     WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "").strip()
@@ -117,14 +138,12 @@ class Settings:
     LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
     LOG_USE_UTC = os.getenv("LOG_USE_UTC", "false").lower() == "true"
 
+
 settings = Settings()
 
 
-# v2.2 P1#13：JWT_SECRET 启动校验（fail-loud，避免空密钥静默签发废 token）
+# v2.2 P1#13：JWT_SECRET 启动校验
 def _validate_jwt_secret():
-    """启动时检查 JWT_SECRET，prod 模式下空/太短直接 RuntimeError 阻止启动；
-    dev 模式放行但用临时密钥 + RuntimeWarning 告知。
-    """
     import secrets
     import warnings
     secret = settings.JWT_SECRET
@@ -132,18 +151,15 @@ def _validate_jwt_secret():
     if not secret:
         if env == "prod":
             raise RuntimeError(
-                "[CONFIG] JWT_SECRET 未配置或为空。生产环境必须设置 JWT_SECRET"
-                " 环境变量（至少 32 字符随机串），否则所有签发的 JWT 形同废纸，"
-                "无法被任何 worker 验证。生成方式："
-                "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+                "[CONFIG] JWT_SECRET 未配置或为空。生产环境必须设置 JWT_SECRET。"
+                "生成方式：python -c 'import secrets; print(secrets.token_urlsafe(48))'"
             )
         else:
             dev_secret = "dev-" + secrets.token_urlsafe(32)
             settings.JWT_SECRET = dev_secret
             warnings.warn(
-                f"[CONFIG] JWT_SECRET 未配置，自动生成临时 dev 密钥：{dev_secret[:20]}... "
-                f"多 worker 部署不互通，进程重启后所有 token 失效。"
-                f"生产环境（ENV=prod）必须显式配置 JWT_SECRET。",
+                f"[CONFIG] JWT_SECRET 未配置，自动生成临时 dev 密钥。"
+                f"多 worker 部署不互通，进程重启后所有 token 失效。",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -152,12 +168,10 @@ def _validate_jwt_secret():
         if env == "prod":
             raise RuntimeError(
                 f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符 < 16）。"
-                f"生产环境 JWT_SECRET 至少 16 字符（推荐 32+）。"
             )
         else:
             warnings.warn(
-                f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符），"
-                f"dev 模式放行但强烈建议至少 16 字符。",
+                f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符）。dev 模式放行。",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -165,20 +179,33 @@ def _validate_jwt_secret():
 
 _validate_jwt_secret()
 
+from backend.core.agent_memory_db import init_db as _  # Agent 记忆库初始化
 
-from core.agent_memory_db import init_db as _  # Agent 记忆库初始化
+
+# ── 多 Pipeline 模型解析 ──
+
+NODE_OVERRIDES = {
+    "risk/analyst": "ANALYST_MODEL",
+    "risk/reviewer": "REVIEWER_MODEL",
+    "risk/director": "DEFAULT_MODEL",
+    # 新线不需要节点覆盖，统一走 pipeline 级默认
+}
+
+
+def resolve_model(pipeline_id: str, node: str = "") -> str:
+    """优先级：节点覆盖 > Pipeline 默认 > 全局 DEFAULT"""
+    node_key = f"{pipeline_id}/{node}"
+    node_env = NODE_OVERRIDES.get(node_key)
+    if node_env:
+        val = getattr(settings, node_env, "")
+        if val:
+            return val
+    pipeline_model = getattr(settings, f"{pipeline_id.upper()}_MODEL", "")
+    return pipeline_model or settings.DEFAULT_MODEL
 
 
 def update_llm_config(agent: str, config: dict) -> bool:
-    """
-    更新指定 Agent 的 LLM 配置（仅内存生效，不再写入 .env 文件）。
-    agent: "default" | "analyst" | "reviewer" | "embedding" | "vision" | "agent"
-
-    注意：此函数只更新运行时 settings 对象。
-    如需持久化，请手动编辑 .env 文件，或通过前端设置页保存。
-    """
     _BAD_VALUES = {"test", "sk-test", "", "gpt-4"}
-
     prefix_map = {
         "default":   "DEFAULT",
         "analyst":   "ANALYST",
@@ -189,7 +216,6 @@ def update_llm_config(agent: str, config: dict) -> bool:
     }
     if agent not in prefix_map:
         return False
-
     prefix = prefix_map[agent]
     for field, value in config.items():
         if not isinstance(value, str) or value.strip().lower() in _BAD_VALUES:
@@ -197,15 +223,10 @@ def update_llm_config(agent: str, config: dict) -> bool:
         attr = f"{prefix}_{field.upper()}"
         if hasattr(settings, attr):
             setattr(settings, attr, value.strip())
-
     return True
 
 
 def get_effective_llm_config(agent: str) -> dict:
-    """
-    获取指定 Agent 的有效配置，空缺字段自动回退到 DEFAULT。
-    agent: "analyst" | "reviewer" | "embedding" | "vision" | "agent"
-    """
     prefix_map = {
         "analyst":   "ANALYST",
         "reviewer":  "REVIEWER",
@@ -229,26 +250,16 @@ def get_effective_llm_config(agent: str) -> dict:
 
 
 def get_agent_config() -> tuple[str, str, str]:
-    """
-    Agent 智能体配置回退链：
-        AGENT_* → ANALYST_* → DEFAULT_*
-    返回 (api_key, base_url, model)
-    """
     def field(name: str) -> str:
         v = getattr(settings, f"AGENT_{name.upper()}", "") or ""
         if v: return v
         v = getattr(settings, f"ANALYST_{name.upper()}", "") or ""
         if v: return v
         return getattr(settings, f"DEFAULT_{name.upper()}", "") or ""
-
     return field("api_key"), field("base_url"), field("model")
 
 
 def get_agent_config_for_user(owner_id: str) -> tuple[str, str, str]:
-    """
-    v2.2 per-user：优先读 model_config 表 AGENT 角色配置，
-    未配置时回退到全局 settings（AGENT_* → ANALYST_* → DEFAULT_*）。
-    """
     try:
         from core.model_config_db import get_effective_config
         cfg = get_effective_config(owner_id, "AGENT")

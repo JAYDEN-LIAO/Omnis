@@ -13,10 +13,10 @@ import umap
 from collections import OrderedDict
 from typing import List
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("radar.cluster")
-from core.config import settings
+from backend.core.config import settings
 from .llm_gateway import call_llm, embedding_client
 
 

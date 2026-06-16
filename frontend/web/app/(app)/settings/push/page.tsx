@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { pushApi, type PushConfig } from '@/lib/api';
 import { toast } from 'sonner';
+import { GuestBlock } from '@/components/layout/guest-block';
+import { isGuest } from '@/lib/auth-client';
 
 const emailSchema = z.object({
   enabled: z.boolean(),
@@ -40,6 +42,10 @@ const INPUT_CLASS =
   'w-full px-4 py-3 rounded-lg bg-white/70 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm text-[color:var(--on-surface)] placeholder:text-[color:var(--on-surface-variant)]/40';
 
 export default function PushSettingsPage() {
+  // 游客拦截
+  if (isGuest()) {
+    return <GuestBlock feature="推送设置" />;
+  }
   const [activeTab, setActiveTab] = useState<string>('email');
 
   const { data: configs, isLoading } = useQuery({

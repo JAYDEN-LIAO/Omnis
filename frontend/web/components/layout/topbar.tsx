@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { authApi, radarApi } from '@/lib/api';
+import { isGuest } from '@/lib/auth-client';
 
 const pageTitles: Record<string, string> = {
   '/agent': 'Omnis Agent',
@@ -90,7 +91,7 @@ function AvatarDropdown({
   user,
   router,
 }: {
-  user: { nickname?: string; email?: string };
+  user: { nickname?: string; email?: string; role?: string };
   router: ReturnType<typeof useRouter>;
 }) {
   const [open, setOpen] = useState(false);
@@ -108,6 +109,8 @@ function AvatarDropdown({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
+  const isGuestUser = isGuest();
+
   const handleLogout = () => {
     localStorage.removeItem('mediaradar_token');
     router.push('/login');
@@ -120,7 +123,7 @@ function AvatarDropdown({
         className="w-8 h-8 rounded-full bg-white/50 backdrop-blur border border-black/5 flex items-center justify-center cursor-pointer hover:border-[var(--primary-gold)] transition-colors overflow-hidden"
       >
         <span className="text-[11px] font-semibold" style={{ color: 'var(--on-surface-variant)' }}>
-          {user.nickname?.[0]?.toUpperCase() || 'U'}
+          {isGuestUser ? 'G' : user.nickname?.[0]?.toUpperCase() || 'U'}
         </span>
       </button>
 
@@ -131,23 +134,27 @@ function AvatarDropdown({
             className="absolute right-0 top-full mt-2 z-20 w-44 rounded-xl border shadow-lg overflow-hidden"
             style={{ background: 'white', borderColor: 'var(--border-faint)' }}
           >
-            <Link
-              href="/settings/account"
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-black/5"
-              style={{ color: 'var(--on-surface)' }}
-            >
-              <span className="material-symbols-outlined text-lg">settings</span>
-              账号设置
-            </Link>
-            <div className="h-px" style={{ background: 'var(--border-faint)' }} />
+            {!isGuestUser && (
+              <>
+                <Link
+                  href="/settings/account"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-black/5"
+                  style={{ color: 'var(--on-surface)' }}
+                >
+                  <span className="material-symbols-outlined text-lg">settings</span>
+                  账号设置
+                </Link>
+                <div className="h-px" style={{ background: 'var(--border-faint)' }} />
+              </>
+            )}
             <button
               onClick={handleLogout}
               className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm transition-colors hover:bg-black/5"
               style={{ color: 'var(--status-error)' }}
             >
               <span className="material-symbols-outlined text-lg">logout</span>
-              退出登录
+              {isGuestUser ? '退出游客模式' : '退出登录'}
             </button>
           </div>
         </>

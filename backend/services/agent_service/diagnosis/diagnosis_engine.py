@@ -12,9 +12,9 @@ import time
 from typing import Callable, Any, Dict, Optional
 from openai import OpenAI
 
-from core.config import settings
-from core.logger import get_logger
-from core.circuit_breaker import CircuitBreaker, CircuitState
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core.circuit_breaker import CircuitBreaker, CircuitState
 from .prompts import DIAGNOSIS_PROMPT
 from .recovery_strategies import RECOVERY_STRATEGIES
 
@@ -68,7 +68,7 @@ class DiagnosisEngine:
 
     def get_client(self, owner_id: str = ""):
         """v2.2 P0.3：按 owner_id 读 per-user 配置"""
-        from core.config import get_agent_config_for_user, get_agent_config
+        from backend.core.config import get_agent_config_for_user, get_agent_config
         if owner_id:
             key, url, _ = get_agent_config_for_user(owner_id)
         else:
@@ -77,7 +77,7 @@ class DiagnosisEngine:
 
     def _get_model(self, owner_id: str = "") -> str:
         """v2.2 P0.3：取用户配置的模型名"""
-        from core.config import get_agent_config_for_user, get_agent_config
+        from backend.core.config import get_agent_config_for_user, get_agent_config
         if owner_id:
             _, _, model = get_agent_config_for_user(owner_id)
         else:
@@ -110,6 +110,10 @@ class DiagnosisEngine:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
+            if not response.choices:
+                logger.warning(f"[Diagnosis] LLM 返回空 choices for tool={tool_name}")
+                return {"error_type": error_type or "unknown", "recovery_strategy": "no_retry",
+                        "reason": "LLM 返回空 choices"}
             content = response.choices[0].message.content.strip()
             # 提取 JSON
             if "```json" in content:
@@ -191,6 +195,19 @@ class DiagnosisEngine:
                 _circuit_registry.record_success(tool_name)
             else:
                 _circuit_registry.record_failure(tool_name)
+
+        # === Admin Monitor: 记录诊断事件 ===
+        try:
+            from backend.services.admin_service.agent_monitor import get_agent_monitor
+            get_agent_monitor().record_diagnosis(
+                owner_id=owner_id, tool_name=tool_name,
+                error_type=diagnosis.get("error_type", ""),
+                recovery=diagnosis.get("recovery_strategy", ""),
+                success=recovered.get("success", False),
+            )
+        except Exception:
+            pass
+        # === 诊断记录结束 ===
 
         if recovered.get("success"):
             return json.dumps(recovered, ensure_ascii=False)

@@ -17,10 +17,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
-from core.database import get_db_connection
-from core.logger import get_logger
-from core.subscription_db import get_subscription_by_id
-from services.radar_service.db_manager import (
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
+from backend.core.subscription_db import get_subscription_by_id
+from backend.services.radar_service.db_manager import (
     get_latest_results,
     get_topic_posts,
     get_topic_summary_by_id,

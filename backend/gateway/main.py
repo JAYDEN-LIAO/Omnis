@@ -10,6 +10,7 @@ if _sys_init.platform == "win32":
         _sys_init.stdout.reconfigure(line_buffering=True)
         _sys_init.stderr.reconfigure(line_buffering=True)
     except Exception:
+        # stdout/stderr reconfigure 非关键路径，失败不影响功能
         pass
 
 from contextlib import asynccontextmanager
@@ -21,31 +22,37 @@ import traceback
 import sys
 import os
 
-# 将 backend 目录动态加入系统路径，确保能够跨越子目录导入其他模块
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
+# P4: 将项目根目录和 backend/ 目录加入 PYTHONPATH
+# - project root → from backend.xxx 标准包导入
+# - backend/ dir → 兼容遗留的 from core.xxx 导入
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+_BACKEND_DIR = os.path.join(_PROJECT_ROOT, "backend")
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 
-# 按照新目录结构导入雷达业务模块的路由
-from services.radar_service.api import router as radar_router
-from services.agent_service.api import router as agent_router
-from services.auth_service.api import router as auth_router  # WS4: 多用户认证
-from services.subscription_service.api import router as subscription_router  # v2.2: 订阅/模型/配额/admin
+# 标准包导入
+from backend.services.radar_service.api import router as radar_router
+from backend.services.agent_service.api import router as agent_router
+from backend.services.auth_service.api import router as auth_router  # WS4: 多用户认证
+from backend.services.subscription_service.api import router as subscription_router  # v2.2: 订阅/模型/配额/admin
+from backend.services.admin_service.api import router as admin_monitor_router  # Admin Agent 监控
 
 # 触发 agent_service 模块加载，确保其 Counter/Histogram 已注册到 prometheus 默认注册表
-import services.agent_service.agent_core  # noqa: F401
+import backend.services.agent_service.agent_core  # noqa: F401
 
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-from core.config import settings
-from core.logger import get_logger
-from core.rate_limiter import add_rate_limiting_middleware
-from core.security_middleware import (
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core.rate_limiter import add_rate_limiting_middleware
+from backend.core.security_middleware import (
     add_security_headers_middleware,
     add_max_body_size_middleware,
 )
 # v2.2: 触发订阅表初始化
-import services.radar_service.db_manager  # noqa: F401  触发 init_radar_db
+import backend.services.radar_service.db_manager  # noqa: F401  触发 init_radar_db
 logger = get_logger("gateway")
 
 
@@ -71,6 +78,18 @@ async def lifespan(app: FastAPI):
         # P0#5：原 logger.warning 升级为 logger.error，且标记状态
         logger.error(f"[Gateway] 调度器启动异常: {e}", exc_info=True)
         app.state.scheduler_start_msg = f"启动异常: {e}"
+        app.state.scheduler_healthy = False
+
+    # Agent Ops 调度器（智能运维引擎）
+    try:
+        from backend.services.admin_service.agent_ops import get_agent_ops
+        ops_success, ops_msg = get_agent_ops().start()
+        if ops_success:
+            logger.info(f"[Gateway] {ops_msg}")
+        else:
+            logger.warning(f"[Gateway] Ops 调度器: {ops_msg}")
+    except Exception as e:
+        logger.error(f"[Gateway] Ops 调度器启动异常: {e}", exc_info=True)
 
     yield  # ── 应用运行中 ──
 
@@ -85,6 +104,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[Gateway] 调度器关闭异常: {e}", exc_info=True)
 
+    # Agent Ops 调度器停止
+    try:
+        from backend.services.admin_service.agent_ops import get_agent_ops
+        ops_success, ops_msg = get_agent_ops().stop()
+        if ops_success:
+            logger.info(f"[Gateway] {ops_msg}")
+    except Exception as e:
+        logger.error(f"[Gateway] Ops 调度器关闭异常: {e}", exc_info=True)
+
+    # Fix 3.4: 关闭全局 HTTP 客户端，避免 TCP 连接泄漏
+    try:
+        from services.radar_service.llm_gateway import global_http_client
+        global_http_client.close()
+        logger.info("[Gateway] 全局 HTTP 客户端已关闭")
+    except Exception:
+        pass
+
 
 app = FastAPI(
     title="MediaRadar 统一接口网关",
@@ -94,7 +130,7 @@ app = FastAPI(
 )
 
 # 8.1 trace_id 中间件：每个请求生成/沿用 trace_id，注入 ContextVar，回写响应头
-from core.context import set_trace_id, generate_trace_id, clear_trace_id
+from backend.core.context import set_trace_id, generate_trace_id, clear_trace_id
 
 
 @app.middleware("http")
@@ -157,6 +193,7 @@ app.include_router(radar_router, tags=["舆情雷达业务层"])
 app.include_router(agent_router, tags=["AI助手业务层"])
 app.include_router(auth_router, tags=["WS4 用户认证"])
 app.include_router(subscription_router, tags=["v2.2 订阅/模型/配额"])
+app.include_router(admin_monitor_router, tags=["Admin Agent 监控"])
 
 
 @app.get("/metrics", tags=["可观测性"])
@@ -173,21 +210,47 @@ async def metrics():
 @app.get("/health", tags=["可观测性"])
 async def health_check():
     """
-    Gateway 健康检查（v2.2 P0#5）：
-      - 200 + {"scheduler": "ok"} 调度器正常
-      - 503 + {"scheduler": "failed", "msg": "..."} 调度器启动失败
-    监控 / k8s readiness probe 可据此判断是否就绪。
+    Gateway 健康检查（v2.2 P2 Fix 10）：
+      - scheduler: 调度器状态
+      - database: SQLite 连通性 (SELECT 1)
+      - qdrant: Qdrant 连通性 (get_collections)
+      任一组件 unhealthy → 503
     """
     healthy = getattr(app.state, "scheduler_healthy", False)
     msg = getattr(app.state, "scheduler_start_msg", "未启动")
-    payload = {
+
+    checks = {
         "scheduler": "ok" if healthy else "failed",
     }
     if not healthy:
-        payload["msg"] = msg
+        checks["scheduler_msg"] = msg
+
+    # DB 连通性检查
+    try:
+        import sqlite3
+        from core.config import settings
+        conn = sqlite3.connect(settings.STATE_DB_PATH, timeout=5.0)
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = "failed"
+        checks["database_msg"] = str(e)[:200]
+
+    # Qdrant 连通性检查
+    try:
+        from core.qdrant_client import get_qdrant_client
+        client = get_qdrant_client()
+        client.get_collections()
+        checks["qdrant"] = "ok"
+    except Exception as e:
+        checks["qdrant"] = "failed"
+        checks["qdrant_msg"] = str(e)[:200]
+
+    all_healthy = all(v == "ok" for v in checks.values() if isinstance(v, str))
     return JSONResponse(
-        status_code=200 if healthy else 503,
-        content=payload,
+        status_code=200 if all_healthy else 503,
+        content=checks,
     )
 if __name__ == "__main__":
     # ── v2.2 安全检查 ─────────────────────────────────────

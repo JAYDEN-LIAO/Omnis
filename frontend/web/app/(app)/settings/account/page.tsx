@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { authApi } from '@/lib/api';
 import { toast } from 'sonner';
+import { GuestBlock } from '@/components/layout/guest-block';
+import { isGuest } from '@/lib/auth-client';
 
 const NOTIFICATION_DETAILS: Record<string, { desc: string }> = {
   'Critical Alerts': { desc: '即时系统异常' },
@@ -84,6 +86,11 @@ export default function AccountSettingsPage() {
         <Skeleton className="h-48 w-full rounded-xl" />
       </div>
     );
+  }
+
+  // 游客拦截
+  if (isGuest()) {
+    return <GuestBlock feature="账号设置" />;
   }
 
   return (

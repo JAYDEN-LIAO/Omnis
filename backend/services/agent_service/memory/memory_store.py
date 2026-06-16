@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("agent.memory")
 
@@ -294,12 +294,12 @@ class AgentMemoryStore:
             cursor = conn.cursor()
             if owner_id:
                 cursor.execute(
-                    "SELECT session_id, summary, created_at FROM conversation_summary WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
+                    "SELECT session_id, owner_id, summary, created_at FROM conversation_summary WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
                     (owner_id, limit),
                 )
             else:
                 cursor.execute(
-                    "SELECT session_id, summary, created_at FROM conversation_summary ORDER BY created_at DESC LIMIT ?",
+                    "SELECT session_id, owner_id, summary, created_at FROM conversation_summary ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 )
             rows = []
@@ -307,6 +307,7 @@ class AgentMemoryStore:
                 summary_text = r["summary"] or ""
                 rows.append({
                     "session_id": r["session_id"],
+                    "owner_id": r["owner_id"] or "",
                     "title": summary_text[:30] + "…" if len(summary_text) > 30 else summary_text or "新对话",
                     "created_at": r["created_at"],
                 })
@@ -485,3 +486,14 @@ class AgentMemoryStore:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[table] = cursor.fetchone()[0]
             return stats
+
+    def count_active_sessions(self, hours: int = 24) -> int:
+        """统计最近 N 小时内有过对话的 session 数"""
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM chat_messages WHERE created_at > ?",
+                (cutoff,))
+            return cursor.fetchone()[0]

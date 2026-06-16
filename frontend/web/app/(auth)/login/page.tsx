@@ -63,6 +63,21 @@ function LoginForm() {
     }
   };
 
+  const handleGuestLogin = async () => {
+    setPending('guest');
+    try {
+      const res = await authApi.guestLogin();
+      persistAuth(res.token, 'guest');
+      toast.success('游客模式已开启');
+      router.replace(redirect);
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || '游客登录失败';
+      toast.error(msg);
+    } finally {
+      setPending(null);
+    }
+  };
+
   const handleGoogleLogin = async () => {
     setPending('google');
     try {
@@ -395,9 +410,15 @@ function LoginForm() {
               注册
             </button>
             或
-            <a className="font-bold hover:underline ml-1" href="#" style={{ color: 'var(--primary-gold)' }}>
-              游客访问
-            </a>
+            <button
+              type="button"
+              onClick={handleGuestLogin}
+              disabled={pending !== null}
+              className="font-bold hover:underline ml-1 inline"
+              style={{ color: 'var(--primary-gold)', opacity: pending !== null ? 0.6 : 1 }}
+            >
+              {pending === 'guest' ? '处理中...' : '游客访问'}
+            </button>
           </p>
         </div>
 

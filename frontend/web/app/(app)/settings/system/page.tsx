@@ -59,8 +59,8 @@ export default function SystemSettingsPage() {
 
   const save = useMutation({
     mutationFn: (v: FormValues) => radarApi.saveSettings(v as SystemSettings),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['system-settings'] });
+    onError: (e: Error) => {
+      toast.error(e.message || '保存失败');
     },
   });
 
@@ -84,7 +84,10 @@ export default function SystemSettingsPage() {
     autoSaveTimer.current = setTimeout(() => {
       form.handleSubmit(
         (v) => save.mutate(v),
-        () => {}, // onInvalid – no-op to avoid submitting with validation errors
+        (errors) => {
+          const first = Object.keys(errors)[0];
+          if (first) console.warn('[Settings] form invalid, not saving:', first, (errors as Record<string, unknown>)[first]);
+        },
       )();
     }, 1500);
     return () => {

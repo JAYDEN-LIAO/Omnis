@@ -152,8 +152,10 @@ async def get_file_content(file_path: str, preview: bool = True, limit: int = 10
                 raise HTTPException(status_code=400, detail="Unsupported file type for preview")
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON file")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=500, detail="Internal server error processing file")
     else:
         # Return file download
         return FileResponse(

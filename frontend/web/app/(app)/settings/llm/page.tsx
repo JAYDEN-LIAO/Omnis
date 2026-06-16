@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { llmApi, type LLMConfigItem } from '@/lib/api';
 import { toast } from 'sonner';
+import { GuestBlock } from '@/components/layout/guest-block';
+import { isGuest } from '@/lib/auth-client';
 
 const ROLE_CLASS: Record<string, string> = {
   default: 'role-default',
@@ -26,6 +28,10 @@ const INPUT_CLASS =
   'w-full bg-white/70 border border-[color:var(--border-faint)] focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.15)] rounded-lg px-3 py-2 text-sm transition-all outline-none';
 
 export default function LLMSettingsPage() {
+  // 游客拦截
+  if (isGuest()) {
+    return <GuestBlock feature="模型配置" />;
+  }
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['llm-configs'], queryFn: () => llmApi.configs() });
   const [revealKey, setRevealKey] = useState<Record<string, boolean>>({});

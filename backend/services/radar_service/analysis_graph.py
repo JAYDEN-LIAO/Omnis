@@ -13,7 +13,7 @@ LangGraph 分析子图
 
 from langgraph.graph import StateGraph, END
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("radar.analysis")
 from .schemas import RadarGraphState, AnalystResult, ReviewerResult

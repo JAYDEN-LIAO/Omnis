@@ -13,18 +13,27 @@ import mimetypes
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("radar.vision")
-from core.config import settings
+from backend.core.config import settings
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-vision_client = OpenAI(
-    api_key=getattr(settings, "VISION_API_KEY", ""),
-    base_url=getattr(settings, "VISION_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-)
+class _LazyVisionClient:
+    def __init__(self):
+        self._client = None
+    def _get(self):
+        if self._client is None:
+            k = getattr(settings, "VISION_API_KEY", None) or settings.DEFAULT_API_KEY or ""
+            u = getattr(settings, "VISION_BASE_URL", None) or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            self._client = OpenAI(api_key=k or "placeholder", base_url=u, timeout=60.0)
+        return self._client
+    def __getattr__(self, name):
+        return getattr(self._get(), name)
+
+vision_client = _LazyVisionClient()
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -79,7 +88,7 @@ def call_vision_llm(image_url: str, post_text: str = "", platform: str = "wb", p
     # ────────────────────────────────────────────
 
     try:
-        logger.info(f"[VISION INPUT] 传给视觉模型的提示词: {prompt}")
+        logger.debug(f"[VISION INPUT] 传给视觉模型的提示词: {prompt}")
 
         response = vision_client.chat.completions.create(
             model=getattr(settings, "VISION_MODEL", "qwen-vl-max"),
@@ -92,8 +101,11 @@ def call_vision_llm(image_url: str, post_text: str = "", platform: str = "wb", p
             }],
             max_tokens=300
         )
+        if not response.choices:
+            logger.warning("[VISION] 视觉模型返回空 choices")
+            return ""
         result_text = response.choices[0].message.content.strip()
-        logger.info(f"[VISION OUTPUT] 视觉解析结果: {result_text}")
+        logger.debug(f"[VISION OUTPUT] 视觉解析结果: {result_text}")
         return result_text
 
     except Exception as e:

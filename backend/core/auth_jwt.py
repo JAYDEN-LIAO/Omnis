@@ -6,14 +6,15 @@ WS4: JWT 签发 / 验签 / 黑名单
 - 验签时同步检查 token_blacklist 表
 """
 import hashlib
-from datetime import datetime, timedelta
+import time as _time
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 import jwt
 
-from core.config import settings
-from core.logger import get_logger
-from core import auth_db
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core import auth_db
 
 logger = get_logger("auth.jwt")
 
@@ -32,7 +33,7 @@ def encode_token(user_id: str, role: str, extra_claims: Optional[Dict[str, Any]]
 
 def encode_access_token(user_id: str, role: str, extra_claims: Optional[Dict[str, Any]] = None) -> str:
     """签发 access JWT（24h 短期，用于 API 鉴权）"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expire = now + timedelta(hours=settings.JWT_EXPIRE_HOURS)
     payload: Dict[str, Any] = {
         "sub": user_id,
@@ -55,7 +56,7 @@ def encode_refresh_token(user_id: str, role: str, extra_claims: Optional[Dict[st
     - role 嵌在 payload 里（防止用户升 admin 后旧 refresh 还能签 admin token 时
       仍按 role 字段返回，但生产环境应配合 token 黑名单或用户状态检查）
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expire = now + timedelta(hours=settings.JWT_REFRESH_EXPIRE_HOURS)
     payload: Dict[str, Any] = {
         "sub": user_id,
@@ -122,9 +123,9 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[Di
         try:
             inv_after = auth_db.get_tokens_invalid_after(user_id)
             if inv_after is not None:
-                # 解析为 UTC 秒数
-                from datetime import datetime as _dt
-                inv_ts = _dt.fromisoformat(inv_after).timestamp()
+                # 解析为 UTC 秒数（DB 存的是 UTC naive，显式设时区避免 tz 偏移）
+                from datetime import datetime as _dt, timezone as _tz
+                inv_ts = _dt.fromisoformat(inv_after).replace(tzinfo=_tz.utc).timestamp()
                 if iat <= inv_ts:
                     logger.warning(f"[JWT] token 已被批量撤销（user={user_id[:8]}...）")
                     return None
@@ -149,3 +150,29 @@ def revoke_token(token: str) -> bool:
     expires_at = datetime.fromtimestamp(exp_ts).isoformat()
     auth_db.add_to_blacklist(_hash_token(token), expires_at)
     return True
+
+
+def encode_guest_access_token(client_ip: str = "") -> str:
+    """签发 guest JWT（短生命周期，无 refresh token）。
+
+    sub 格式: g_{random_hex}，与普通用户 u_ 前缀区分。
+    不查 users 表，不写 DB。
+
+    注意：必须用 timezone-aware datetime，否则在非 UTC 时区机器上
+    .timestamp() 会错误地将 naive UTC 时间当作本地时间解析，
+    导致 iat/exp 偏移数小时，token 签发即过期。
+    """
+    import uuid
+    now_ts = _time.time()
+    guest_id = f"g_{uuid.uuid4().hex[:16]}"
+    payload: Dict[str, Any] = {
+        "sub": guest_id,
+        "role": "guest",
+        "type": "access",
+        "guest": True,
+        "ip_hint": client_ip,
+        "iat": int(now_ts),
+        "exp": int(now_ts) + settings.GUEST_TOKEN_EXPIRE_HOURS * 3600,
+    }
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return token

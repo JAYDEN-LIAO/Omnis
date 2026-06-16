@@ -20,20 +20,25 @@ import asyncio
 import subprocess
 import signal
 import os
+import tempfile
 from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
 
 from ..schemas import CrawlerStartRequest, LogEntry
 
+# 跨进程信号文件目录
+_SIGNAL_DIR = Path(tempfile.gettempdir()) / "mediaradar_crawler_signals"
+
 
 class CrawlerManager:
     """Crawler process manager"""
 
-    def __init__(self):
+    def __init__(self, platform: str = ""):
         self._lock = asyncio.Lock()
         self.process: Optional[subprocess.Popen] = None
         self.status = "idle"
+        self.platform = platform
         self.started_at: Optional[datetime] = None
         self.current_config: Optional[CrawlerStartRequest] = None
         self._log_id = 0
@@ -43,6 +48,10 @@ class CrawlerManager:
         self._project_root = Path(__file__).parent.parent.parent
         # Log queue - for pushing to WebSocket
         self._log_queue: Optional[asyncio.Queue] = None
+        # 跨进程信号文件
+        _SIGNAL_DIR.mkdir(parents=True, exist_ok=True)
+        self._pause_flag = _SIGNAL_DIR / f"{platform}_pause" if platform else None
+        self._cancel_flag = _SIGNAL_DIR / f"{platform}_cancel" if platform else None
 
     @property
     def logs(self) -> List[LogEntry]:
@@ -192,6 +201,63 @@ class CrawlerManager:
 
             return True
 
+    async def pause(self) -> bool:
+        """暂停：创建暂停信号文件，子进程检测到后完成当前页后暂停"""
+        if self.status != "running" or not self._pause_flag:
+            return False
+        self._pause_flag.touch()
+        self.status = "paused"
+        entry = self._create_log_entry(f"Crawler paused (current page will complete)", "warning")
+        await self._push_log(entry)
+        return True
+
+    async def resume(self) -> bool:
+        """恢复：删除暂停信号文件"""
+        if self.status != "paused" or not self._pause_flag:
+            return False
+        self._pause_flag.unlink(missing_ok=True)
+        self.status = "running"
+        entry = self._create_log_entry("Crawler resumed", "success")
+        await self._push_log(entry)
+        return True
+
+    async def cancel(self) -> bool:
+        """优雅取消：标记取消请求，等待当前页面完成。超时 30s 后 SIGTERM。"""
+        if not self.process or self.process.poll() is not None:
+            return False
+        if self._cancel_flag:
+            self._cancel_flag.touch()
+        self.status = "cancelling"
+        entry = self._create_log_entry("Cancelling crawler (waiting for current page)...", "warning")
+        await self._push_log(entry)
+
+        try:
+            await asyncio.wait_for(
+                self._wait_process_exit(),
+                timeout=30,
+            )
+        except asyncio.TimeoutError:
+            entry = self._create_log_entry("Cancel timeout, force stopping...", "warning")
+            await self._push_log(entry)
+            return await self.stop()
+
+        self._cleanup_signals()
+        self.status = "idle"
+        return True
+
+    async def _wait_process_exit(self) -> bool:
+        """等待进程自行退出（子进程检测到 cancel flag 后 exit(0)）"""
+        while self.process and self.process.poll() is None:
+            await asyncio.sleep(0.5)
+        return True
+
+    def _cleanup_signals(self):
+        """清理信号文件"""
+        if self._pause_flag:
+            self._pause_flag.unlink(missing_ok=True)
+        if self._cancel_flag:
+            self._cancel_flag.unlink(missing_ok=True)
+
     def get_status(self) -> dict:
         """Get current status"""
         return {
@@ -266,8 +332,37 @@ class CrawlerManager:
                 exit_code = self.process.returncode if self.process else -1
                 if exit_code == 0:
                     entry = self._create_log_entry("Crawler completed successfully", "success")
+                    # === OutputValidator: 正常退出后检测产出物质量 ===
+                    try:
+                        from backend.services.crawler_service.healer.output_validator import OutputValidator
+                        platform = self.current_config.platform.value if self.current_config else ""
+                        # NOTE: posts = [] 占位 —— _read_output 不持有产出物；
+                        # 后续在 pipeline 层拿到入库数据后可做完整轮检。
+                        issues = OutputValidator().validate(platform, posts=[])
+                        critical = [i for i in issues["issues"] if i["severity"] == "critical"]
+                        if critical:
+                            entry_warn = self._create_log_entry(
+                                f"[Validator] 产出物质量问题: {'; '.join(i['detail'] for i in critical)}",
+                                "warning")
+                            await self._push_log(entry_warn)
+                    except Exception as e:
+                        self._create_log_entry(f"[Validator] 质检异常: {e}", "error")
+                    # === Validator 结束 ===
                 else:
                     entry = self._create_log_entry(f"Crawler exited with code: {exit_code}", "warning")
+                    # === CrawlerHealer: 异常退出时触发自愈分析 ===
+                    if exit_code != 0:
+                        try:
+                            from backend.services.crawler_service.healer import CrawlerHealer
+                            if not hasattr(self, '_healer'):
+                                self._healer = CrawlerHealer(self)
+                            heal_result = await self._healer.analyze_and_recover(exit_code)
+                            if heal_result.get("restarted"):
+                                self._create_log_entry(
+                                    f"[Healer] 已自动恢复并重启: {heal_result.get('action')}", "info")
+                        except Exception as e:
+                            self._create_log_entry(f"[Healer] 自愈引擎异常: {e}", "error")
+                    # === Healer 结束 ===
                 await self._push_log(entry)
                 self.status = "idle"
 

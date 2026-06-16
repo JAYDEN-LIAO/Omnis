@@ -8,10 +8,10 @@ WS4: FastAPI 依赖注入
 from fastapi import Header, HTTPException, status, Depends, Security
 from typing import Optional, Dict, Any
 
-from core.auth_jwt import decode_token
-from core.auth_db import get_user_by_id
-from core.logger import get_logger
-from core.auth import API_KEY_HEADER, get_valid_api_keys
+from backend.core.auth_jwt import decode_token
+from backend.core.auth_db import get_user_by_id
+from backend.core.logger import get_logger
+from backend.core.auth import API_KEY_HEADER, get_valid_api_keys
 
 logger = get_logger("auth.deps")
 
@@ -52,6 +52,16 @@ async def get_current_user(
             detail={"code": 401, "msg": "token payload 缺少 sub", "data": None},
         )
 
+    # 游客分支：返回合成 dict，不走 DB
+    if payload.get("role") == "guest":
+        return {
+            "id": user_id,
+            "role": "guest",
+            "is_active": True,
+            "nickname": "访客",
+            "email": None,
+        }
+
     user = get_user_by_id(user_id)
     if not user or not user.get("is_active"):
         raise HTTPException(
@@ -74,6 +84,17 @@ async def get_optional_user(
     user_id = payload.get("sub")
     if not user_id:
         return None
+
+    # 游客分支：返回合成 dict
+    if payload.get("role") == "guest":
+        return {
+            "id": user_id,
+            "role": "guest",
+            "is_active": True,
+            "nickname": "访客",
+            "email": None,
+        }
+
     user = get_user_by_id(user_id)
     return user if user and user.get("is_active") else None
 
@@ -106,7 +127,13 @@ async def get_current_user_or_api_key(
 
     # 再试 API Key
     if api_key and api_key in get_valid_api_keys():
-        return {"id": "api_service", "role": "admin", "is_active": True}
+        logger.info("[Auth] API Key 认证成功 (service_id=api_service)")
+        return {"id": "api_service", "role": "api_service", "is_active": True}
+
+    # 记录 API Key 失败尝试（区分于无 Key 场景）
+    if api_key and api_key not in get_valid_api_keys():
+        masked = api_key[:4] + "***" if len(api_key) > 4 else "***"
+        logger.warning(f"[Auth] API Key 认证失败: invalid key prefix={masked}")
 
     # 都失败
     raise HTTPException(
@@ -125,3 +152,23 @@ async def require_admin(
             detail={"code": 403, "msg": "需要 admin 权限", "data": None},
         )
     return current_user
+
+
+async def require_registered_user(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """拒绝 guest 角色，仅允许已注册用户（user/admin）通过。
+
+    用于写入/敏感端点，确保游客无法执行需要注册账号的操作。
+    """
+    if current_user.get("role") == "guest":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": 403, "msg": "此功能需要注册账号", "data": None},
+        )
+    return current_user
+
+
+def can_view_all_data(role: str) -> bool:
+    """仅 admin 能查看全局数据；普通用户和 guest 按 owner_id 过滤"""
+    return role == "admin"

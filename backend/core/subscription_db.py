@@ -9,8 +9,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 
 logger = get_logger("core.sub")
 
@@ -35,6 +35,7 @@ _SUBSCRIPTION_DDL = '''
         push_mode TEXT DEFAULT 'important',
         show_risk_alert INTEGER DEFAULT 0,
         is_active INTEGER DEFAULT 1,
+        pipeline_types TEXT DEFAULT '["risk"]',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -69,6 +70,11 @@ def _row_to_dict(row) -> dict:
     # show_risk_alert INTEGER → bool
     d["show_risk_alert"] = bool(d.get("show_risk_alert", 0))
     d["is_active"] = bool(d.get("is_active", 1))
+    # pipeline_types JSON → list
+    try:
+        d["pipeline_types"] = json.loads(d.get("pipeline_types", '["risk"]') or '["risk"]')
+    except (json.JSONDecodeError, TypeError):
+        d["pipeline_types"] = ["risk"]
     return d
 
 

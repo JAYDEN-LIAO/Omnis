@@ -19,6 +19,9 @@ from . import query  # noqa: F401  C 组 数据查询
 from . import push  # noqa: F401  D 组 推送通道
 from . import model  # noqa: F401  E 组 模型管理
 from . import search  # noqa: F401  F 组 全网搜索
+from . import guide  # noqa: F401  F1 组 攻略查询
+from . import celebrity  # noqa: F401  F2 组 追星查询
+from . import briefing  # noqa: F401  F3 组 简报查询
 
 from ._base import (
     ToolResult,

@@ -4,8 +4,8 @@ ReflectionEngine: 置信度评估 + 补充探查 prompt 生成
 import json
 from typing import Literal
 from openai import OpenAI
-from core.config import settings
-from core.logger import get_logger
+from backend.core.config import settings
+from backend.core.logger import get_logger
 from .prompts import REFLECTION_PROMPT, REFLECTION_MEDI_PROMPT
 
 logger = get_logger("agent.reflection")
@@ -18,7 +18,7 @@ class ReflectionEngine:
 
     def get_client(self, owner_id: str = ""):
         """v2.2 P0.3：按 owner_id 读 per-user 配置，未传时回退全局默认"""
-        from core.config import get_agent_config_for_user, get_agent_config
+        from backend.core.config import get_agent_config_for_user, get_agent_config
         if owner_id:
             key, url, _ = get_agent_config_for_user(owner_id)
         else:
@@ -27,7 +27,7 @@ class ReflectionEngine:
 
     def _get_model(self, owner_id: str = "") -> str:
         """v2.2 P0.3：取用户配置的模型名，空则用 settings.DEFAULT_MODEL"""
-        from core.config import get_agent_config_for_user, get_agent_config
+        from backend.core.config import get_agent_config_for_user, get_agent_config
         if owner_id:
             _, _, model = get_agent_config_for_user(owner_id)
         else:
@@ -59,6 +59,9 @@ class ReflectionEngine:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
+            if not response.choices:
+                logger.warning("[Reflection] LLM 返回空 choices (置信度评估)")
+                return {"confidence": "high", "reasoning": "LLM 返回空 choices，默认通过", "missing_info": ""}
             content = response.choices[0].message.content.strip()
 
             # 提取 JSON
@@ -98,6 +101,9 @@ class ReflectionEngine:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
+            if not response.choices:
+                logger.warning("[Reflection] LLM 返回空 choices (补充探查)")
+                return {"action": "degrade", "degrade_answer": "分析引擎暂时无法完成评估，请稍后重试。"}
             content = response.choices[0].message.content.strip()
 
             if "```json" in content:
@@ -120,5 +126,5 @@ class ReflectionEngine:
             else:
                 data_preview = str(data)[:100]
             return f"基于目前数据倾向于：{data_preview}..."
-        except:
+        except Exception:
             return "基于目前数据，暂时无法给出准确回答，请稍后重试。"

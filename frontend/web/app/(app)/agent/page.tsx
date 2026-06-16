@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useAgentStream } from '@/components/chat/useAgentStream';
 import { MessageStream } from '@/components/chat/MessageStream';
 import { RightDashboard } from '@/components/chat/RightDashboard';
 import { authApi, agentApi, type AgentSession } from '@/lib/api';
 import type { AssistantMessage } from '@/components/chat/sse-types';
+import { isGuest } from '@/lib/auth-client';
 
 type UIMessage =
   | { kind: 'user'; content: string }
@@ -60,6 +62,7 @@ const WELCOME_PILLS = [
 ];
 
 export default function AgentPage() {
+  const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [history, setHistory] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
@@ -153,7 +156,7 @@ export default function AgentPage() {
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed || isStreaming || isGuestUser) return;
 
     setHistory((h) => [...h, { kind: 'user', content: trimmed }]);
     setInput('');
@@ -174,6 +177,8 @@ export default function AgentPage() {
       onSessionId: (sid) => setSessionId(sid),
     });
   };
+
+  const isGuestUser = isGuest();
 
   const startNewSession = () => {
     // 当前已是空对话则不重复创建空白 session
@@ -196,8 +201,9 @@ export default function AgentPage() {
         <div className="px-3 mb-2">
           <button
             onClick={startNewSession}
+            disabled={isGuestUser}
             className="flex items-center gap-1.5 text-xs transition-all hover:opacity-70"
-            style={{ color: 'var(--on-surface-variant)' }}
+            style={{ color: 'var(--on-surface-variant)', opacity: isGuestUser ? 0.4 : 1 }}
           >
             <span className="material-symbols-outlined text-base">add</span>
             <span className="label-caps text-[10px] tracking-wider font-medium">新对话</span>
@@ -258,8 +264,10 @@ export default function AgentPage() {
                 <button
                   key={pill.label}
                   type="button"
-                  onClick={() => { setInput(pill.prompt); inputRef.current?.focus(); }}
+                  disabled={isGuestUser}
+                  onClick={() => { if (!isGuestUser) { setInput(pill.prompt); inputRef.current?.focus(); } }}
                   className="px-4 py-2 rounded-full caustic-card text-sm text-[color:var(--on-surface-variant)] hover:text-[color:var(--primary-gold)] hover:border-[color:var(--primary-gold)]/30 transition-all flex items-center gap-1.5"
+                  style={{ opacity: isGuestUser ? 0.5 : 1, cursor: isGuestUser ? 'not-allowed' : 'pointer' }}
                 >
                   <span className="material-symbols-outlined text-base">{pill.icon}</span>
                   {pill.label}
@@ -321,26 +329,41 @@ export default function AgentPage() {
               onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
               className="glass-slab rounded-[2rem] p-2 flex items-center gap-3"
             >
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage(input);
-                  }
-                }}
-                placeholder="向 Omnis 提问：舆情分析、风险查询、全网搜索..."
-                rows={1}
-                className="flex-1 bg-transparent border-none outline-none text-sm resize-none py-2 scrollbar-hide max-h-32 ml-2"
-                style={{ color: 'var(--on-surface)' }}
-                onInput={(e) => {
-                  const el = e.currentTarget;
-                  el.style.height = 'auto';
-                  el.style.height = `${el.scrollHeight}px`;
-                }}
-              />
+              {isGuestUser ? (
+                <div className="flex-1 flex items-center gap-2 ml-2 py-2">
+                  <span className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>请</span>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/login')}
+                    className="font-semibold underline-offset-2 hover:underline text-sm"
+                    style={{ color: 'var(--primary-gold)' }}
+                  >
+                    登录
+                  </button>
+                  <span className="text-sm" style={{ color: 'var(--on-surface-variant)' }}>后使用 Omnis</span>
+                </div>
+              ) : (
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage(input);
+                    }
+                  }}
+                  placeholder="向 Omnis 提问：舆情分析、风险查询、全网搜索..."
+                  rows={1}
+                  className="flex-1 bg-transparent border-none outline-none text-sm resize-none py-2 scrollbar-hide max-h-32 ml-2"
+                  style={{ color: 'var(--on-surface)' }}
+                  onInput={(e) => {
+                    const el = e.currentTarget;
+                    el.style.height = 'auto';
+                    el.style.height = `${el.scrollHeight}px`;
+                  }}
+                />
+              )}
               {isStreaming ? (
                 <button
                   type="button"
@@ -350,7 +373,7 @@ export default function AgentPage() {
                 >
                   <span className="material-symbols-outlined text-xl">close</span>
                 </button>
-              ) : (
+              ) : !isGuestUser ? (
                 <button
                   type="submit"
                   disabled={!input.trim()}
@@ -359,14 +382,14 @@ export default function AgentPage() {
                 >
                   <span className="material-symbols-outlined text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
                 </button>
-              )}
+              ) : null}
             </form>
           </div>
         </div>
       </div>
 
       {/* Fixed right panel — Intelligence Live */}
-      <aside className="fixed right-4 top-20 bottom-4 w-[300px] rounded-xl glass-slab flex flex-col z-40 overflow-hidden">
+      <aside className="fixed right-4 top-20 bottom-4 w-[300px] rounded-xl glass-slab flex flex-col z-0 overflow-hidden">
         <RightDashboard onQuickAction={sendMessage} />
       </aside>
     </div>

@@ -6,8 +6,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from openai import OpenAI
-from core.config import settings, get_agent_config
-from core.logger import get_logger
+from backend.core.config import settings, get_agent_config
+from backend.core.logger import get_logger
 from .memory_store import AgentMemoryStore
 
 logger = get_logger("agent.memory")
@@ -82,8 +82,8 @@ class AgentMemoryManager:
         if not owner_id:
             return ""
         try:
-            from core.subscription_db import list_subscriptions
-            from core.quota_db import get_scan_config
+            from backend.core.subscription_db import list_subscriptions
+            from backend.core.quota_db import get_scan_config
 
             subs = list_subscriptions(owner_id) if callable(list_subscriptions) else []
             scan = get_scan_config(owner_id) if callable(get_scan_config) else {}
@@ -168,6 +168,9 @@ class AgentMemoryManager:
                 max_tokens=100,
                 temperature=0.3
             )
+            if not response.choices:
+                logger.warning("[Memory] LLM 返回空 choices (摘要)")
+                return f"对话包含 {len(messages)} 条消息"
             return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"摘要生成失败: {e}")
@@ -206,6 +209,9 @@ class AgentMemoryManager:
                 max_tokens=500,
                 response_format={"type": "json_object"},
             )
+            if not resp.choices:
+                logger.warning("[Memory] LLM 返回空 choices (事实抽取)")
+                return
             raw = resp.choices[0].message.content
             parsed = json.loads(raw)
             facts = parsed if isinstance(parsed, list) else parsed.get("facts", [])
@@ -251,6 +257,9 @@ class AgentMemoryManager:
                 max_tokens=300,
                 response_format={"type": "json_object"},
             )
+            if not resp.choices:
+                logger.warning("[Memory] LLM 返回空 choices (实体抽取)")
+                return []
             raw = resp.choices[0].message.content
             parsed = json.loads(raw)
             items = parsed if isinstance(parsed, list) else parsed.get("entities", [])

@@ -19,14 +19,14 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from core.logger import get_logger
-from services.radar_service.db_manager import (
+from backend.core.logger import get_logger
+from backend.services.radar_service.db_manager import (
     get_all_push_configs,
     get_push_config,
     save_push_config,
 )
-from services.radar_service.notifier import reload_registry, test_channel
-from services.radar_service.notifier.models import PushChannel
+from backend.services.radar_service.notifier import reload_registry, test_channel
+from backend.services.radar_service.notifier.models import PushChannel
 
 from ._base import ToolResult, tool
 from ._owner import with_owner

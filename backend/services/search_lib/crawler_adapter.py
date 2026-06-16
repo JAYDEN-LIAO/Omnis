@@ -12,11 +12,9 @@ import sys
 from typing import AsyncGenerator, Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
 
-from core.logger import get_logger
-from core.config import settings
+from backend.core.logger import get_logger
+from backend.core.config import settings
 
 logger = get_logger("search.crawler_adapter")
 
@@ -96,7 +94,7 @@ def _read_latest_posts(platform: str, query: str, max_count: int = 10) -> list[d
                 val = str(r[image_col])
                 if val.startswith('['):
                     try: image_urls = __import__('json').loads(val)
-                    except: pass
+                    except Exception: pass
                 else:
                     image_urls = [u.strip() for u in val.split(',') if u.strip()]
 
@@ -110,7 +108,7 @@ def _read_latest_posts(platform: str, query: str, max_count: int = 10) -> list[d
             })
         return results
     except Exception as e:
-        logger.error(f"[CrawlerAdapter] 读取平台 {platform} 失败: {e}")
+        logger.error(f"[CrawlerAdapter] 读取平台 {platform} 失败: {e}", exc_info=True)
         return []
 
 
@@ -175,11 +173,11 @@ async def quick_crawl_stream(
                 logger.info(f"[CrawlerAdapter] {plat} 爬虫完成, returncode={proc.returncode}")
         except Exception as e:
             proc.kill()
-            logger.error(f"[CrawlerAdapter] {plat} 爬虫异常 [{type(e).__name__}]: {e!r}")
+            logger.error(f"[CrawlerAdapter] {plat} 爬虫异常 [{type(e).__name__}]: {e!r}", exc_info=True)
             continue
         finally:
             try: proc.wait(timeout=5)
-            except: proc.kill()
+            except Exception: proc.kill()
 
         if proc.returncode is None or proc.returncode != 0:
             # 读取 stderr 日志，帮助排查爬虫崩溃原因

@@ -14,10 +14,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from core.auth_deps import get_current_user
-from core.logger import get_logger
+from backend.core.auth_deps import get_current_user, require_registered_user
+from backend.core.logger import get_logger
 
-from .agent_core import chat_with_agent_stream
+from .agent_core import chat_with_agent_stream, cancel_registry
 from .memory import AgentMemoryManager
 from .tools import reset_current_owner, set_current_owner
 
@@ -60,11 +60,11 @@ async def _stream_with_owner(
 @router.post("/api/agent/chat")
 async def agent_chat_endpoint(
     request: ChatRequest,
-    current_user: Dict = Depends(get_current_user),
+    current_user: Dict = Depends(require_registered_user),
 ):
     """
     SSE 流式对话（v2.2 P2：多事件协议）。
-    - 需 Bearer token
+    - 需注册用户（游客不可使用，LLM 成本控制）
     - owner_id 注入到 contextvar + _request，工具层双保险
     - 事件类型：text / tool_call / tool_progress / tool_result / error / done
     """
@@ -149,6 +149,19 @@ async def get_session_messages(
     except Exception as e:
         logger.error(f"[session_messages] {e}")
         return {"success": False, "error": str(e)}
+
+
+# ==================== 打断机制：取消指定 session ====================
+
+
+@router.post("/api/agent/chat/{session_id}/cancel")
+async def cancel_agent_stream(
+    session_id: str,
+    current_user: Dict = Depends(require_registered_user),
+):
+    """取消指定 session 当前正在执行的 Agent 流。"""
+    cancelled = cancel_registry.cancel(session_id)
+    return {"code": 200, "data": {"cancelled": cancelled}}
 
 
 @router.delete("/api/agent/memory/{session_id}")

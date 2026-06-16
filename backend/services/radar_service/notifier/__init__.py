@@ -24,7 +24,7 @@ v2.2 安全说明：
 from threading import Lock
 from typing import Optional
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 from .models import (
     AlertPayload,

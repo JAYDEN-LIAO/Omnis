@@ -9,14 +9,8 @@ RSS 并非"推送"通道（不发消息），而是为每个用户生成唯一 R
   - RSS 端点 /rss/{token}.xml 在 api.py 中注册
 """
 import datetime
-import os
-import sys
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("notifier.rss")
 

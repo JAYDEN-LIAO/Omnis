@@ -14,20 +14,14 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from typing import List, Optional, TYPE_CHECKING
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("radar.aggregator")
 from .db_manager import (
     create_or_update_topic_summary,
-    add_post_to_topic,
+    add_posts_to_topic_batch,
 )
 
 if TYPE_CHECKING:
@@ -152,11 +146,10 @@ class TopicAggregator:
             owner_id=owner_id,
         )
 
-        # 写入 topic_posts 关联
-        for p in cluster.posts:
-            post_id = p.get("post_id", "")
-            if post_id:
-                add_post_to_topic(topic_id, post_id, is_current=1, owner_id=owner_id)
+        # 写入 topic_posts 关联（Fix 5.3：批量写入替代 N+1）
+        post_ids = [p.get("post_id", "") for p in cluster.posts if p.get("post_id")]
+        if post_ids:
+            add_posts_to_topic_batch(topic_id, post_ids, owner_id=owner_id)
 
         logger.info(
             f"[TopicAggregator] topic_id={topic_id}, "

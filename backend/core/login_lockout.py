@@ -24,8 +24,8 @@ import threading
 import time
 from typing import Optional
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 
 logger = get_logger("core.login_lockout")
 

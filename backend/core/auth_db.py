@@ -8,8 +8,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 from passlib.hash import bcrypt
 
 logger = get_logger("auth.db")

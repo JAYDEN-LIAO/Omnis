@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 from .._search_cache import clear_history, list_history, record_search
 from ._base import ToolResult, tool

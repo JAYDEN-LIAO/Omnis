@@ -1,6 +1,6 @@
 # backend/services/radar_service/notifier/registry.py
 from typing import Optional
-from core.logger import get_logger
+from backend.core.logger import get_logger
 from .base import NotifierBase
 from .models import (
     AlertPayload,
@@ -70,7 +70,7 @@ class NotifierRegistry:
                 ok = notifier.send(payload)
                 results[ch] = ok
             except Exception as e:
-                logger.error(f"[Registry] {ch.value} 发送异常: {e}")
+                logger.error(f"[Registry] {ch.value} 发送异常: {e}", exc_info=True)
                 results[ch] = False
         return results
 
@@ -92,7 +92,7 @@ class NotifierRegistry:
                 ok = notifier.send_batch(batch)
                 results[ch] = ok
             except Exception as e:
-                logger.error(f"[Registry] {ch.value} 批量发送异常: {e}")
+                logger.error(f"[Registry] {ch.value} 批量发送异常: {e}", exc_info=True)
                 results[ch] = False
         return results
 

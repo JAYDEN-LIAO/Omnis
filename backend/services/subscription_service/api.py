@@ -10,21 +10,21 @@ v2.2：订阅服务 API
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 
-from core.auth_deps import get_current_user, require_admin
-from core.subscription_db import (
+from backend.core.auth_deps import get_current_user, require_admin, require_registered_user
+from backend.core.subscription_db import (
     list_subscriptions, get_subscription_by_id,
     create_subscription, update_subscription, delete_subscription,
 )
-from core.model_config_db import (
+from backend.core.model_config_db import (
     list_model_configs, upsert_model_config, delete_model_config, get_model_config,
     AGENT_ROLES,
 )
-from core.quota_db import get_quota, update_quota, increment_chat_count
-from core.quota import enforce_quota
-from core.auth_db import list_users, deactivate_user, get_user_by_id, update_user_role
-from core.logger import get_logger
+from backend.core.quota_db import get_quota, update_quota, increment_chat_count
+from backend.core.quota import enforce_quota
+from backend.core.auth_db import list_users, deactivate_user, get_user_by_id, update_user_role
+from backend.core.logger import get_logger
 
 logger = get_logger("subscription.api")
 
@@ -35,20 +35,20 @@ router = APIRouter()
 
 class SubscriptionCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    type: str = "keyword"
-    polarity: str = "all"
-    sensitivity: str = "balanced"
+    type: Literal["keyword", "account", "topic", "domain"] = "keyword"
+    polarity: Literal["all", "negative", "positive", "neutral"] = "all"
+    sensitivity: Literal["balanced", "high", "low"] = "balanced"
     frequency_min: int = 60
     platforms: List[str] = []
-    push_mode: str = "important"
+    push_mode: Literal["every", "important", "none"] = "important"
     show_risk_alert: bool = False
 
 
 class SubscriptionUpdateRequest(BaseModel):
     name: Optional[str] = None
-    type: Optional[str] = None
-    polarity: Optional[str] = None
-    sensitivity: Optional[str] = None
+    type: Optional[Literal["keyword", "account", "topic", "domain"]] = None
+    polarity: Optional[Literal["all", "negative", "positive", "neutral"]] = None
+    sensitivity: Optional[Literal["balanced", "high", "low"]] = None
     frequency_min: Optional[int] = None
     platforms: Optional[List[str]] = None
     push_mode: Optional[str] = None
@@ -81,7 +81,8 @@ def api_list_subscriptions(current_user: dict = Depends(get_current_user)):
 @router.post("/api/subscriptions", status_code=201)
 def api_create_subscription(
     req: SubscriptionCreateRequest,
-    current_user: dict = Depends(enforce_quota("subscription")),
+    _: dict = Depends(enforce_quota("subscription")),
+    current_user: dict = Depends(require_registered_user),
 ):
     """新增订阅（受配额限制）"""
     try:
@@ -114,7 +115,7 @@ def api_get_subscription(sub_id: str, current_user: dict = Depends(get_current_u
 def api_update_subscription(
     sub_id: str,
     req: SubscriptionUpdateRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_registered_user),
 ):
     is_admin = current_user.get("role") == "admin"
     fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
@@ -128,7 +129,7 @@ def api_update_subscription(
 
 
 @router.delete("/api/subscriptions/{sub_id}")
-def api_delete_subscription(sub_id: str, current_user: dict = Depends(get_current_user)):
+def api_delete_subscription(sub_id: str, current_user: dict = Depends(require_registered_user)):
     is_admin = current_user.get("role") == "admin"
     ok = delete_subscription(current_user["id"], sub_id)
     if not ok:
@@ -149,7 +150,7 @@ def api_list_model_configs(current_user: dict = Depends(get_current_user)):
 def api_upsert_model_config(
     agent_role: str,
     req: ModelConfigUpsertRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_registered_user),
 ):
     """更新某角色的模型配置"""
     if agent_role not in AGENT_ROLES:
@@ -180,7 +181,7 @@ def api_upsert_model_config(
 
 
 @router.delete("/api/model-configs/{agent_role}")
-def api_delete_model_config(agent_role: str, current_user: dict = Depends(get_current_user)):
+def api_delete_model_config(agent_role: str, current_user: dict = Depends(require_registered_user)):
     """删除某角色配置（回退到系统默认）"""
     ok = delete_model_config(current_user["id"], agent_role)
     if not ok:
@@ -203,7 +204,7 @@ def api_get_quota(current_user: dict = Depends(get_current_user)):
 def api_admin_stats(_: dict = Depends(require_admin)):
     """admin 总览统计：用户数、订阅数、活跃话题数、调度器状态"""
     import datetime
-    from core.database import get_db_connection
+    from backend.core.database import get_db_connection
 
     result = {
         "total_users": 0,

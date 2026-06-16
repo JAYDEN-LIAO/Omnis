@@ -1,12 +1,14 @@
 """自适应并发限制器 — 根据成功率动态调整（WS3 新增 HTTP 全局限流）"""
 import asyncio
+import base64
+import json
 import time
 import logging
 from collections import defaultdict
 from typing import Callable, Awaitable
 from fastapi import FastAPI, Request, Response
-from core.logger import get_logger
-from core.config import settings
+from backend.core.logger import get_logger
+from backend.core.config import settings
 
 logger = get_logger("core.rate_limiter")
 
@@ -38,6 +40,8 @@ class SlidingWindowRateLimiter:
         self._auth_limit: int = 5            # WS6-C4 v2.2: 注册/登录 10→5（防爆破）
         self._sensitive_window: int = 60
         self._sensitive_limit: int = 30
+        self._guest_window: int = 60
+        self._guest_limit: int = settings.GUEST_RATE_LIMIT
         self._cleanup_interval: int = 300    # 每 5 分钟清理一次过期 key
         self._last_cleanup: float = time.time()
 
@@ -52,8 +56,11 @@ class SlidingWindowRateLimiter:
         client = request.client
         return f"ip:{client.host if client else 'unknown'}"
 
-    def _get_limit_for_path(self, path: str) -> tuple[int, int]:
-        """根据路径返回 (窗口秒数, 限制次数)"""
+    def _get_limit_for_path(self, path: str, is_guest: bool = False) -> tuple[int, int]:
+        """根据路径和用户角色返回 (窗口秒数, 限制次数)"""
+        # 游客走更低的全局限流
+        if is_guest:
+            return self._guest_window, self._guest_limit
         auth_paths = ("/api/auth/", "/api/user/register", "/api/user/login")
         sensitive_paths = ("/api/settings", "/api/llm/config", "/api/push/config")
         if any(path.startswith(p) for p in auth_paths):
@@ -82,9 +89,13 @@ class SlidingWindowRateLimiter:
         if keys_to_delete:
             logger.debug(f"[RateLimiter] 清理过期限流记录: {len(keys_to_delete)} keys")
 
-    def check(self, request: Request) -> tuple[bool, int, int]:
+    def check(self, request: Request, is_guest: bool = False) -> tuple[bool, int, int]:
         """
         检查是否允许请求通过。
+
+        Args:
+            request: FastAPI 请求对象
+            is_guest: 是否为游客用户（游客走更严格的全局限流）
 
         Returns:
             (allowed: bool, remaining: int, retry_after: int)
@@ -92,7 +103,7 @@ class SlidingWindowRateLimiter:
         """
         self._periodic_cleanup()
         key = self._make_key(request)
-        window, limit = self._get_limit_for_path(request.url.path)
+        window, limit = self._get_limit_for_path(request.url.path, is_guest=is_guest)
         now = time.time()
         cutoff = now - window
 
@@ -115,6 +126,29 @@ class SlidingWindowRateLimiter:
 
 # 全局限流器实例
 _rate_limiter = SlidingWindowRateLimiter()
+
+
+def _decode_guest_from_header(request: Request) -> bool:
+    """从 Authorization header 轻量解码 JWT payload，判断是否为游客。
+
+    不验签（仅 base64 decode payload），仅用于限流决策。
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    parts = auth.split(None, 2)
+    if len(parts) != 2:
+        return False
+    try:
+        payload_b64 = parts[1].split(".")[1]
+        # 补 padding
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        payload = json.loads(base64.b64decode(payload_b64))
+        return payload.get("role") == "guest"
+    except (IndexError, json.JSONDecodeError, Exception):
+        return False
 
 
 def add_rate_limiting_middleware(app: FastAPI):
@@ -140,7 +174,8 @@ def add_rate_limiting_middleware(app: FastAPI):
         if not _has_auth and not _is_auth_path:
             return await call_next(request)
 
-        allowed, remaining, retry_after = _rate_limiter.check(request)
+        is_guest = _decode_guest_from_header(request)
+        allowed, remaining, retry_after = _rate_limiter.check(request, is_guest=is_guest)
         response: Response = await call_next(request) if allowed else Response(
             status_code=429,
             content='{"code": 429, "msg": "请求过于频繁，请稍后再试", "data": null}',

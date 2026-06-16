@@ -22,7 +22,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
-from core.logger import get_logger
+from backend.core.logger import get_logger
+from backend.core.context import set_trace_id, generate_trace_id
 
 logger = get_logger("radar.scheduler")
 
@@ -53,6 +54,39 @@ def _mark_user_scanned(owner_id: str) -> None:
         _user_last_scan_at[owner_id] = datetime.datetime.now()
 
 
+def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: list[str]):
+    """为非风险 pipeline 类型运行轻量级分析（复用已爬取数据）"""
+    from .pipeline_configs import PIPELINE_BUILDERS
+    from .pipeline import PipelineConfig, RadarPipeline
+
+    for pt in pipeline_types:
+        builder = PIPELINE_BUILDERS.get(pt)
+        if not builder:
+            logger.warning(f"[Scheduler] 未知 pipeline_type={pt}，跳过")
+            continue
+
+        try:
+            # 获取未处理的帖子数据
+            from .db import get_unprocessed_posts
+            from backend.core.config import settings
+
+            pipeline = builder(keywords[0] if keywords else "", [], owner_id)
+            platform = pipeline.config.platform
+
+            posts = get_unprocessed_posts(settings.CRAWLER_DB_PATH, platform)
+            if posts:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                results = loop.run_until_complete(pipeline.run(posts))
+                logger.info(
+                    f"[Scheduler] {pt} pipeline 完成: {len(results)} 条结果 (user={owner_id[:8]}...)"
+                )
+            else:
+                logger.info(f"[Scheduler] {pt} pipeline: 无未处理数据")
+        except Exception as e:
+            logger.error(f"[Scheduler] {pt} pipeline 异常: {e}", exc_info=True)
+
+
 def _get_scan_job_id() -> str:
     return "radar_scheduled_scan"
 
@@ -77,26 +111,38 @@ def _build_trigger(start_time: str, monitor_frequency: float):
 
 def _collect_users_and_keywords():
     """
-    从 subscription 表收集所有非暂停用户的订阅关键词。
+    从 subscription 表收集所有非暂停用户的订阅关键词和 pipeline 类型。
 
     Returns:
-        dict[str, list[str]]: {owner_id: [keyword1, keyword2, ...]}
+        dict[str, list[tuple[str, list[str], list[str]]]]:
+            {owner_id: [(keyword, platforms, pipeline_types), ...]}
     """
     try:
         import sqlite3
-        from core.database import get_db_connection
+        import json
+        from backend.core.database import get_db_connection
         with get_db_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT owner_id, name FROM subscription WHERE is_active = 1"
+                "SELECT owner_id, name, platforms, pipeline_types FROM subscription WHERE is_active = 1"
             )
             rows = cursor.fetchall()
-        result: dict[str, list[str]] = {}
+        result: dict[str, list[tuple[str, list[str], list[str]]]] = {}
         for r in rows:
             oid = r["owner_id"]
             name = r["name"]
-            result.setdefault(oid, []).append(name)
+            platforms = []
+            try:
+                platforms = json.loads(r["platforms"] or "[]")
+            except Exception:
+                pass
+            pipeline_types = ["risk"]
+            try:
+                pipeline_types = json.loads(r["pipeline_types"] or '["risk"]')
+            except Exception:
+                pass
+            result.setdefault(oid, []).append((name, platforms, pipeline_types))
         return result
     except Exception as e:
         logger.warning(f"[Scheduler] 读取 subscriptions 失败: {e}")
@@ -113,6 +159,8 @@ def _run_scan():
       3. 若用户已暂停或距上次扫描未到间隔，跳过
       4. 否则为该用户跑 Pipeline（owner-scoped）
     """
+    # Fix 7.7: 调度器在裸线程运行，ContextVar 不会传播，需手动设置 trace_id
+    set_trace_id(generate_trace_id())
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -129,14 +177,14 @@ def _run_scan():
                                 return
 
                             # 2. 读取 per-user 扫描配置
-                            from core.quota_db import get_scan_config
+                            from backend.core.quota_db import get_scan_config
                             from .main import job_async
 
-                            ready_users: list[tuple[str, list[str]]] = []
+                            ready_users: list[tuple[str, list[tuple[str, list[str], list[str]]]]] = []
                             skipped_paused = 0
                             skipped_interval = 0
 
-                            for oid, kws in user_keywords.items():
+                            for oid, sub_infos in user_keywords.items():
                                 try:
                                     cfg = get_scan_config(oid)
                                 except Exception as e:
@@ -151,7 +199,7 @@ def _run_scan():
                                 if not _should_user_scan_now(oid, interval_min):
                                     skipped_interval += 1
                                     continue
-                                ready_users.append((oid, kws))
+                                ready_users.append((oid, sub_infos))
 
                             logger.info(
                                 f"[Scheduler] 候选用户 {len(user_keywords)} 个 → "
@@ -163,29 +211,40 @@ def _run_scan():
                                 return
 
                             # 3. 逐用户跑扫描
-                            for oid, kws in ready_users:
+                            for oid, sub_info in ready_users:
+                                # 收集所有唯一关键词
+                                all_kws = list(set(kw for kw, _, _ in sub_info))
+                                # 收集 pipeline_types
+                                all_pts = set(pt for _, _, pts in sub_info for pt in pts)
                                 logger.info(
                                     f"[Scheduler] 为用户 {oid[:8]}... 执行扫描"
-                                    f"（{len(kws)} 关键词）"
+                                    f"（{len(all_kws)} 关键词, {all_pts}）"
                                 )
                                 try:
-                                    await job_async(owner_id=oid)
+                                    # 风险线：走原有完整流程（爬虫+分析）
+                                    if "risk" in all_pts:
+                                        await job_async(owner_id=oid)
+                                    # 其他线：在已爬数据上运行不同 pipeline
+                                    non_risk_pts = [pt for pt in all_pts if pt != "risk"]
+                                    if non_risk_pts:
+                                        await _run_extra_pipelines(oid, non_risk_pts, all_kws)
                                     _mark_user_scanned(oid)
                                 except Exception as e:
                                     logger.error(
-                                        f"[Scheduler] user={oid[:8]}... 扫描异常: {e}"
+                                        f"[Scheduler] user={oid[:8]}... 扫描异常: {e}",
+                                        exc_info=True,
                                     )
 
                             logger.info("[Scheduler] 定时雷达扫描完成")
                         except Exception as e:
-                            logger.error(f"[Scheduler] 定时雷达扫描异常: {e}")
+                            logger.error(f"[Scheduler] 定时雷达扫描异常: {e}", exc_info=True)
                 loop.run_until_complete(_run())
             else:
                 logger.warning("[Scheduler] 扫描进行中，跳过本次触发")
         finally:
             loop.close()
     except Exception as e:
-        logger.error(f"[Scheduler] 扫描线程异常: {e}")
+        logger.error(f"[Scheduler] 扫描线程异常: {e}", exc_info=True)
 
 
 def scheduler_start() -> tuple[bool, str]:
@@ -199,7 +258,7 @@ def scheduler_start() -> tuple[bool, str]:
         from .db_manager import get_system_settings
         conf = get_system_settings()
     except Exception as e:
-        logger.error(f"[Scheduler] 无法读取系统配置: {e}")
+        logger.error(f"[Scheduler] 无法读取系统配置: {e}", exc_info=True)
         return False, f"读取配置失败: {e}"
 
     start_time = conf.get("start_time", "08:00")
@@ -331,14 +390,9 @@ def _get_summary_job_id() -> str:
 
 def _run_daily_summary():
     """每日简报任务（运行在线程中，per-user 分发）"""
+    # Fix 7.7: ContextVar 不会传播到调度器线程，需手动设置
+    set_trace_id(generate_trace_id())
     try:
-        from .db_manager import get_system_settings
-        conf = get_system_settings()
-
-        if not conf.get("push_summary", False):
-            logger.info("[Scheduler] 每日简报开关未开启，跳过")
-            return
-
         # v2.2: 收集所有活跃订阅用户，逐一为其生成 + 推送简报
         user_keywords = _collect_users_and_keywords()
         if not user_keywords:
@@ -352,10 +406,21 @@ def _run_daily_summary():
                 logger.info(
                     f"[Scheduler] 开始为 {len(user_keywords)} 个用户生成每日简报..."
                 )
+                from .db_manager import get_system_settings
                 from .push_generator import generate_daily_summary_html
                 from .notifier import send_alert
 
                 for oid in user_keywords.keys():
+                    try:
+                        # 检查该用户是否开启了每日简报
+                        user_conf = get_system_settings(owner_id=oid)
+                        if not user_conf.get("push_summary", False):
+                            logger.debug(
+                                f"用户 {oid[:8]}... 每日简报未开启，跳过"
+                            )
+                            continue
+                    except Exception:
+                        continue
                     try:
                         html = await generate_daily_summary_html(owner_id=oid)
                         if not html:
@@ -379,13 +444,14 @@ def _run_daily_summary():
                         )
                     except Exception as e:
                         logger.error(
-                            f"[Scheduler] 用户 {oid[:8]}... 每日简报异常: {e}"
+                            f"[Scheduler] 用户 {oid[:8]}... 每日简报异常: {e}",
+                            exc_info=True,
                         )
             loop.run_until_complete(_run())
         finally:
             loop.close()
     except Exception as e:
-        logger.error(f"[Scheduler] 每日简报线程异常: {e}")
+        logger.error(f"[Scheduler] 每日简报线程异常: {e}", exc_info=True)
 
 
 def _schedule_daily_summary():
@@ -445,7 +511,7 @@ def _run_memory_cleanup():
         deleted = mgr.cleanup_expired_memory()
         logger.info(f"[Scheduler] 记忆清理完成: 删除 {deleted} 条过期 fact")
     except Exception as e:
-        logger.error(f"[Scheduler] 记忆清理异常: {e}")
+        logger.error(f"[Scheduler] 记忆清理异常: {e}", exc_info=True)
 
 
 def _schedule_memory_cleanup():

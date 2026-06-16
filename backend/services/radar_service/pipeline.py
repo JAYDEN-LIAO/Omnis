@@ -17,16 +17,12 @@ Radar Pipeline 调度器
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
-from typing import List, NamedTuple, Optional
+import threading
+from typing import List, NamedTuple, Optional, Dict
 from dataclasses import dataclass
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.logger import get_logger
+from backend.core.logger import get_logger
+from backend.core.metrics import RADAR_POSTS, RADAR_ALERTS, PIPELINE_DURATION, ACTIVE_ANALYSIS_TASKS
 
 logger = get_logger("radar.pipeline")
 from .schemas import ScreenerResult
@@ -60,6 +56,49 @@ class PipelineResult:
     topic_id: str = ""          # 话题唯一标识（MD5）
     evolution_timeline: dict = None  # 话题演化时间线
     sentiment: str = "Neutral"  # LLM 返回的情感
+
+
+# ============================================================
+# 多 Pipeline Result dataclass（攻略/追星/简报）
+# ============================================================
+
+
+@dataclass
+class GuideResult:
+    """攻略线结果"""
+    topic: str
+    keyword: str
+    summary: str
+    consensus: list[str]
+    controversial: list[str]
+    tips: list[str]
+    source_breakdown: dict
+    post_count: int
+    topic_id: str = ""
+
+
+@dataclass
+class CelebrityResult:
+    """追星线结果"""
+    celebrity: str
+    keyword: str
+    total_posts: int
+    sentiment_distribution: dict
+    heat_trend: str
+    hot_topics: list[str]
+    cross_platform: dict
+    topic_id: str = ""
+
+
+@dataclass
+class BriefingResult:
+    """简报线结果"""
+    date: str
+    domain: str
+    highlight: str
+    post_count: int
+    sentiment: str
+    topic_id: str = ""
 
 
 @dataclass
@@ -111,15 +150,19 @@ class ScreenerStage:
     # Screener 阶段并发上限（DeepSeek API 限流保护）
     SCREENER_CONCURRENCY = 10
 
-    def __init__(self, keywords: List[str], keyword_levels: dict):
+    def __init__(self, keywords: List[str], keyword_levels: dict,
+                 prompt: str = "", pydantic_model=None):
         self.keywords = keywords
         self.keyword_levels = keyword_levels
         self._screener_semaphore = asyncio.Semaphore(self.SCREENER_CONCURRENCY)
+        # 多 Pipeline：支持外部注入，不配则回退到默认
+        self._prompt_template = prompt if prompt else SCREENER_PROMPT
+        self._pydantic_model = pydantic_model if pydantic_model is not None else ScreenerResult
 
     def _build_prompt(self, keyword: str) -> str:
         """为单个关键词构建 prompt（隔离策略，避免多关键词互相干扰）"""
         kw_with_level = f"{keyword}(监控等级:{self.keyword_levels.get(keyword, 'balanced')})"
-        return SCREENER_PROMPT.format(keyword=kw_with_level)
+        return self._prompt_template.format(keyword=kw_with_level)
 
     async def _screener_single(
         self,
@@ -156,10 +199,10 @@ class ScreenerStage:
                     call_llm,
                     screener_prompt, text_to_analyze,
                     response_format="json", engine="deepseek",
-                    pydantic_model=ScreenerResult
+                    pydantic_model=self._pydantic_model
                 )
             except Exception as e:
-                logger.error(f"[Screener] LLM 调用失败 (ID:{post_id}): {e}")
+                logger.error(f"[Screener] LLM 调用失败 (ID:{post_id}): {e}", exc_info=True)
                 return (None, None)
 
             # call_llm 现在返回 LLMCallResult，数据在 .data 中
@@ -239,7 +282,7 @@ class ScreenerStage:
         for idx, (keyword, _) in enumerate(all_tasks):
             item = results[idx]
             if isinstance(item, Exception):
-                logger.error(f"[Screener] 并发任务异常: {item}")
+                logger.error(f"[Screener] 并发任务异常: {item}", exc_info=True)
                 continue
             tag, value = item
             if tag == "passed":
@@ -439,7 +482,13 @@ class AnalysisSubGraph:
     对每个 Cluster 调用 LangGraph 分析管线
     （analyst → reviewer → director），
     并在分析前后注入话题演化追踪能力。
+
+    多 Pipeline：可注入外部 analysis_callable。
     """
+
+    def __init__(self, analysis_callable=None):
+        # 不配则回退到默认风险分析
+        self._analyze = analysis_callable if analysis_callable else analyze_and_report
 
     def run(self, cluster: Cluster) -> tuple[Cluster, dict, dict]:
         # 聚合多帖内容
@@ -502,7 +551,7 @@ class AnalysisSubGraph:
                 evolution_timeline = {}
 
         # 4. 调用 LangGraph 分析（携带演化上下文）
-        result = analyze_and_report(
+        result = self._analyze(
             mock_post,
             keyword=cluster.keyword,
             sensitivity=cluster.sensitivity,
@@ -586,6 +635,65 @@ class PipelineConfig:
     # v2.2 P1#29：推送模式（every=全部推，important=仅重要>=4级，silent=不推）
     push_mode: str = "every"
 
+    # ── 多 Pipeline：可配置的 Screener 参数 ──
+    screener_prompt: str = ""            # 空 = 回退到默认 SCREENER_PROMPT
+    screener_pydantic_model: type = None  # 空 = 回退到 ScreenerResult
+
+    # ── 多 Pipeline：可配置的分析子图 ──
+    analysis_callable: callable = None    # 空 = 回退到 analyze_and_report
+
+    # ── 多 Pipeline：结果构建器 ──
+    result_builder: callable = None       # 空 = 回退到 build_results
+    output_handler: callable = None       # 新线定制输出（攻略报告/追星仪表盘/简报）
+
+
+# ============================================================
+# Pipeline 取消机制
+# ============================================================
+
+
+class PipelineCanceller:
+    """Pipeline 级别取消。每个 run_id 对应一个实例。"""
+
+    def __init__(self):
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+    def check(self):
+        if self._cancelled:
+            raise asyncio.CancelledError("Pipeline 已被取消")
+
+    # ── 全局实例管理 ──
+    _instances: Dict[str, "PipelineCanceller"] = {}
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get(cls, run_id: str) -> "PipelineCanceller":
+        with cls._lock:
+            if run_id not in cls._instances:
+                cls._instances[run_id] = cls()
+            return cls._instances[run_id]
+
+    @classmethod
+    def cancel_run(cls, run_id: str) -> bool:
+        with cls._lock:
+            canceller = cls._instances.get(run_id)
+            if canceller:
+                canceller.cancel()
+                return True
+        return False
+
+    @classmethod
+    def cleanup(cls, run_id: str):
+        with cls._lock:
+            cls._instances.pop(run_id, None)
+
 
 class RadarPipeline:
     """
@@ -605,13 +713,23 @@ class RadarPipeline:
 
     def __init__(self, config: PipelineConfig):
         self.config = config
-        self.screener = ScreenerStage(config.keywords, config.keyword_levels)
+        # 多 Pipeline：ScreenerStage 支持注入 prompt 和 pydantic_model
+        self.screener = ScreenerStage(
+            config.keywords, config.keyword_levels,
+            prompt=config.screener_prompt,
+            pydantic_model=config.screener_pydantic_model,
+        )
         self.vision = VisionStage()
         self.cluster = ClusterStage()
-        self.analysis = AnalysisSubGraph()
+        # 多 Pipeline：AnalysisSubGraph 支持注入 analysis_callable
+        self.analysis = AnalysisSubGraph(
+            analysis_callable=config.analysis_callable,
+        )
         self.aggregator = TopicAggregator()
         # Semaphore 限制并发分析数量，避免触发 Kimi org 并发限制
         self._semaphore = asyncio.Semaphore(config.concurrent_limit)
+        # Pipeline 取消机制
+        self.canceller = PipelineCanceller()
 
     def _get_sensitivity(self, keyword: str) -> str:
         kl = self.config.keyword_levels
@@ -622,7 +740,9 @@ class RadarPipeline:
     async def _run_with_semaphore(self, cluster: Cluster):
         """用 Semaphore 包装的 analysis.run，每次最多 concurrent_limit 个并发"""
         async with self._semaphore:
-            from .analysis_graph import analyze_and_report_async
+            # 打断检查点
+            self.canceller.check()
+            analysis_fn = self.config.analysis_callable
 
             # 构造 mock_post（与 AnalysisSubGraph.run() 逻辑一致）
             combined_text = ""
@@ -633,14 +753,27 @@ class RadarPipeline:
                 "content": combined_text[:2500]
             }
 
-            result = await analyze_and_report_async(
-                mock_post=mock_post,
-                keyword=cluster.keyword,
-                sensitivity=cluster.sensitivity,
-                evolution_timeline={},
-            )
+            if analysis_fn:
+                # 多 Pipeline：使用注入的分析函数
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    analysis_fn,
+                    mock_post, cluster.keyword, cluster.sensitivity, {},
+                )
+                evolution_timeline = result.get("evolution_timeline") or {}
+            else:
+                # 默认：risk 线的异步分析
+                from .analysis_graph import analyze_and_report_async
+                result = await analyze_and_report_async(
+                    mock_post=mock_post,
+                    keyword=cluster.keyword,
+                    sensitivity=cluster.sensitivity,
+                    evolution_timeline={},
+                )
+                evolution_timeline = result.get("evolution_timeline") or {}
+
             # 返回格式与 AnalysisSubGraph.run() 保持一致：3-tuple
-            evolution_timeline = result.get("evolution_timeline") or {}
             return cluster, result, evolution_timeline
 
     async def _background_index(self, topic_id: str, cluster, result, evolution_timeline):
@@ -659,7 +792,7 @@ class RadarPipeline:
             )
             logger.info(f"[TopicTracker] topic_id={topic_id} 已写入/更新 Qdrant")
         except Exception as e:
-            logger.error(f"[Pipeline] 话题索引失败: {e}")
+            logger.error(f"[Pipeline] 话题索引失败: {e}", exc_info=True)
             await self._mark_topic_for_retry(topic_id, cluster)
 
     async def _mark_topic_for_retry(self, topic_id: str, cluster):
@@ -674,11 +807,19 @@ class RadarPipeline:
         """
         # 局部任务列表，避免跨调用泄漏
         background_tasks: list[asyncio.Task] = []
+        pipeline_start = __import__('time').time()
         try:
-            return await asyncio.wait_for(self._run_inner(posts, background_tasks), timeout=self.config.timeout)
+            result = await asyncio.wait_for(self._run_inner(posts, background_tasks), timeout=self.config.timeout)
+            PIPELINE_DURATION.labels(platform=self.config.platform).observe(__import__('time').time() - pipeline_start)
+            return result
         except asyncio.TimeoutError:
             logger.error(f"[Pipeline] Pipeline 超时（>{self.config.timeout}s），强制终止")
-            # 取消所有未完成的后台索引任务
+            for t in background_tasks:
+                if not t.done():
+                    t.cancel()
+            return []
+        except asyncio.CancelledError:
+            logger.info(f"[Pipeline] Pipeline 被取消")
             for t in background_tasks:
                 if not t.done():
                     t.cancel()
@@ -695,6 +836,7 @@ class RadarPipeline:
         """
         # Stage 1: Screener（所有 mode 都走）
         screener_result = await self.screener.run(posts)
+        RADAR_POSTS.labels(platform=self.config.platform, stage="screener").inc(len(screener_result.passed))
         if not screener_result.passed and not screener_result.needs_vision:
             logger.info("[Pipeline] Screener 阶段无相关帖子，全量过滤")
             return []
@@ -707,8 +849,8 @@ class RadarPipeline:
         if self.config.mode == "fan_track":
             return self._sort_by_time(screener_result.passed)
 
-        # Stage 2: Vision（仅 full mode 需要）
-        if self.config.mode == "full":
+        # Stage 2: Vision（full / guide / celebrity / briefing 需要视觉复判）
+        if self.config.mode in ("full", "guide", "celebrity", "briefing"):
             vision_passed = await self.vision.run(screener_result.needs_vision)
         else:
             vision_passed = []
@@ -734,30 +876,101 @@ class RadarPipeline:
         if self.config.mode == "trending":
             return self._sort_by_heat(clusters)
 
-        # ── 以下仅 full mode ─────────────────────────
+        # ── 以下仅 full / guide / celebrity / briefing mode ─────────
 
         # Stage 4: 并行分析（asyncio + Semaphore 限流）
+        ACTIVE_ANALYSIS_TASKS.set(len(clusters))
         tasks = [self._run_with_semaphore(c) for c in clusters]
         analysis_outputs = await asyncio.gather(*tasks, return_exceptions=True)
+        ACTIVE_ANALYSIS_TASKS.set(0)
 
-        # Stage 5: 收集结果 + 预警 + 话题演化追踪
+        # Stage 5: 根据 mode 走不同结果收集
+        if self.config.mode == "guide":
+            return self._build_guide_results(analysis_outputs)
+        elif self.config.mode == "celebrity":
+            return self._build_celebrity_results(analysis_outputs)
+        elif self.config.mode == "briefing":
+            return self._build_briefing_results(analysis_outputs)
+
+        # ── full mode：原有风险收集 + 预警 + 话题演化追踪 ──
+        return self._collect_risk_results(analysis_outputs, background_tasks)
+
+    # ============================================================
+    # 多 Pipeline 结果收集（guide / celebrity / briefing）
+    # ============================================================
+
+    def _build_guide_results(self, analysis_outputs: list) -> List[GuideResult]:
+        """攻略线结果收集"""
+        results = []
+        for item in analysis_outputs:
+            if isinstance(item, Exception):
+                continue
+            cluster, guide_data, _ = item
+            results.append(GuideResult(
+                topic=cluster.topic_name,
+                keyword=cluster.keyword,
+                summary=guide_data.get("summary", ""),
+                consensus=guide_data.get("consensus", []),
+                controversial=guide_data.get("controversial", []),
+                tips=guide_data.get("tips", []),
+                source_breakdown=guide_data.get("sources", {}),
+                post_count=len(cluster.posts),
+            ))
+        logger.info(f"[Pipeline:guide] 共产出 {len(results)} 条攻略结果")
+        return results
+
+    def _build_celebrity_results(self, analysis_outputs: list) -> List[CelebrityResult]:
+        """追星线结果收集"""
+        results = []
+        for item in analysis_outputs:
+            if isinstance(item, Exception):
+                continue
+            cluster, celeb_data, _ = item
+            results.append(CelebrityResult(
+                celebrity=celeb_data.get("celebrity", cluster.keyword),
+                keyword=cluster.keyword,
+                total_posts=len(cluster.posts),
+                sentiment_distribution=celeb_data.get("sentiment_distribution", {}),
+                heat_trend=celeb_data.get("heat_trend", "stable"),
+                hot_topics=celeb_data.get("hot_topics", []),
+                cross_platform=celeb_data.get("cross_platform", {}),
+            ))
+        logger.info(f"[Pipeline:celebrity] 共产出 {len(results)} 条追星结果")
+        return results
+
+    def _build_briefing_results(self, analysis_outputs: list) -> List[BriefingResult]:
+        """简报线结果收集"""
+        results = []
+        for item in analysis_outputs:
+            if isinstance(item, Exception):
+                continue
+            cluster, briefing_data, _ = item
+            results.append(BriefingResult(
+                date=briefing_data.get("date", ""),
+                domain=briefing_data.get("domain", ""),
+                highlight=briefing_data.get("highlight", ""),
+                post_count=len(cluster.posts),
+                sentiment=briefing_data.get("sentiment", "neutral"),
+            ))
+        logger.info(f"[Pipeline:briefing] 共产出 {len(results)} 条简报结果")
+        return results
+
+    async def _collect_risk_results(self, analysis_outputs: list,
+                                     background_tasks: list[asyncio.Task]) -> List[PipelineResult]:
+        """full mode：风险结果收集 + 预警 + 话题演化追踪（原有逻辑拆分至此）"""
         final_results: List[PipelineResult] = []
-        cluster_results: List[tuple] = []  # (cluster, result) pairs for aggregator
-        alerts_to_send: list = []  # 批量预警暂存
+        cluster_results: List[tuple] = []
+        alerts_to_send: list = []
 
         for item in analysis_outputs:
             if isinstance(item, Exception):
-                logger.error(f"[Pipeline] 分析异常: {item}")
+                logger.error(f"[Pipeline] 分析异常: {item}", exc_info=True)
                 continue
             cluster, result, evolution_timeline = item
 
             cluster_results.append((cluster, result))
 
-            # 高危预警（收集到 alerts_to_send，批量发送）
-            # v2.2 P1#29：根据 push_mode 决定是否推送
-            #   - every: 全部推
-            #   - important: 仅 risk_level >= 4（高/严重）
-            #   - silent: 不推（仅供记录）
+            # 高危预警
             _push_mode = self.config.push_mode
             _is_alert = result["status"] == "alert" and self.config.alert_negative
             if _push_mode == "silent":
@@ -784,7 +997,7 @@ class RadarPipeline:
                 )
                 alerts_to_send.append(payload)
 
-            # 收集后台索引任务（asyncio.Task 替代 daemon thread）
+            # 后台索引任务
             if result["risk_level"] >= 3 and evolution_timeline:
                 from .topic_tracker import build_topic_id
                 topic_id = build_topic_id(cluster.keyword, cluster.topic_name)
@@ -797,17 +1010,14 @@ class RadarPipeline:
                 build_results(cluster, result, self.config.platform, evolution_timeline)
             )
 
-        # ── 等待后台索引任务完成 ─────────────────────────
+        # 后台索引等待
         if background_tasks:
-            done, pending = await asyncio.wait(
-                background_tasks, timeout=30
-            )
+            done, pending = await asyncio.wait(background_tasks, timeout=30)
             for t in pending:
                 t.cancel()
                 logger.warning(f"[Pipeline] 索引任务超时取消")
-        # ─────────────────────────────────────────────────
 
-        # ── 话题聚合写入 SQLite ─────────────────────────
+        # 话题聚合写入 SQLite
         if cluster_results:
             try:
                 clusters_for_agg = [c for c, _ in cluster_results]
@@ -817,19 +1027,19 @@ class RadarPipeline:
                 )
             except Exception as e:
                 logger.warning(f"[Pipeline] 话题聚合失败: {e}")
-        # ─────────────────────────────────────────────────
 
-        # ── 批量预警发送（合并为一封邮件）──────────────────
+        # 批量预警发送
         if alerts_to_send:
+            for a in alerts_to_send:
+                RADAR_ALERTS.labels(keyword=a.keyword, risk_level=str(a.risk_level)).inc()
             try:
                 from .notifier import send_batch_alert
                 keyword = self.config.keywords[0] if self.config.keywords else "监控关键词"
                 if not self.config.owner_id:
-                    logger.warning(
-                        "[Pipeline] 缺少 owner_id，跳过批量预警发送（避免跨用户泄漏）"
-                    )
+                    logger.warning("[Pipeline] 缺少 owner_id，跳过批量预警发送")
                 else:
-                    send_batch_alert(
+                    await asyncio.to_thread(
+                        send_batch_alert,
                         owner_id=self.config.owner_id,
                         keyword=keyword,
                         platform=self.config.platform,
@@ -837,8 +1047,7 @@ class RadarPipeline:
                     )
                     logger.info(f"[Pipeline] 批量预警发送完成，共 {len(alerts_to_send)} 条")
             except Exception as e:
-                logger.error(f"[Pipeline] 批量预警发送失败: {e}")
-        # ─────────────────────────────────────────────────
+                logger.error(f"[Pipeline] 批量预警发送失败: {e}", exc_info=True)
 
         logger.info(f"[Pipeline] 完成，共产出 {len(final_results)} 条结果")
         return final_results

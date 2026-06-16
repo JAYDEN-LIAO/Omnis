@@ -13,17 +13,11 @@ Qdrant 向量库封装层
 向量模型：BGE-M3（复用 embedding_client）
 """
 
-import sys
-import os
 import hashlib
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.config import settings
-from core.logger import get_logger
-from core.qdrant_client import get_qdrant_client
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core.qdrant_client import get_qdrant_client
 
 logger = get_logger("radar.vector")
 
@@ -175,6 +169,7 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
     client = OpenAI(
         api_key=settings.EMBEDDING_API_KEY,
         base_url=settings.EMBEDDING_BASE_URL,
+        timeout=60.0,
     )
 
     resp = client.embeddings.create(
@@ -209,6 +204,9 @@ def index_ai_result(result: dict) -> bool:
         )
 
         vectors = _embed_texts([text_to_embed])
+        if not vectors:
+            logger.error(f"[RAG Index] post_id={result.get('post_id')} 向量化返回空列表")
+            return False
         return _upsert_points([result], [vectors[0]]) == 1
 
     except Exception as e:
@@ -246,6 +244,7 @@ def _upsert_points(results: list[dict], vectors: list[list[float]]) -> int:
                     "content_preview": (r.get("content") or "")[:200],
                     "platform": str(r.get("platform") or ""),
                     "publish_time": str(r.get("publish_time") or ""),
+                    "owner_id": str(r.get("owner_id") or ""),
                 },
             )
         )
@@ -347,6 +346,9 @@ def retrieve_similar_cases(
 
         # 1. 生成查询向量
         vectors = _embed_texts([query_text])
+        if not vectors:
+            logger.error("[RAG Retrieve] 查询向量化返回空列表")
+            return []
         query_vector = vectors[0]
 
         # 2. Qdrant 检索（使用 query_points API）
@@ -407,7 +409,7 @@ def migrate_all_history(limit: int = None, batch_size: int = 64) -> tuple[int, i
         (成功写入数, 总数)
     """
     import sqlite3
-    from core.database import get_db_connection
+    from backend.core.database import get_db_connection
 
     # 1. 确保集合存在
     ensure_collection_exists()
@@ -422,7 +424,7 @@ def migrate_all_history(limit: int = None, batch_size: int = 64) -> tuple[int, i
                 (limit,),
             )
         else:
-            cursor.execute("SELECT * FROM ai_results ORDER BY create_time DESC")
+            cursor.execute("SELECT * FROM ai_results ORDER BY create_time DESC LIMIT 1000")
         rows = cursor.fetchall()
 
     results = [dict(r) for r in rows]

@@ -9,12 +9,12 @@ WS4: /api/auth/* 路由
 - /api/admin/users/{id} — 修改角色 / 禁用（admin only）
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, Request
+from pydantic import BaseModel, EmailStr
 
-from core.config import settings
-from core.logger import get_logger
-from core.auth_db import (
+from backend.core.config import settings
+from backend.core.logger import get_logger
+from backend.core.auth_db import (
     init_auth_tables,
     get_user_by_id,
     list_users,
@@ -29,8 +29,8 @@ from core.auth_db import (
     set_password_for_oauth_user,
     reactivate_user,
 )
-from core.auth_jwt import encode_token, encode_access_token, encode_refresh_token, decode_token, revoke_token
-from core.auth_deps import get_current_user, require_admin
+from backend.core.auth_jwt import encode_token, encode_access_token, encode_refresh_token, decode_token, revoke_token, encode_guest_access_token
+from backend.core.auth_deps import get_current_user, require_admin
 
 logger = get_logger("auth.api")
 router = APIRouter()
@@ -56,7 +56,7 @@ class LogoutResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
     nickname: str = ""
 
@@ -183,6 +183,7 @@ async def register(req: RegisterRequest):
         raise HTTPException(status_code=409, detail={"code": 409, "msg": "该邮箱已注册", "data": None})
 
     update_last_login(user["id"])
+    logger.info(f"[AuthAPI] 注册成功: user={user['id']}, email={req.email.strip()}")
     access = encode_access_token(user["id"], user["role"])
     refresh = encode_refresh_token(user["id"], user["role"])
     return {
@@ -197,6 +198,35 @@ async def register(req: RegisterRequest):
     }
 
 
+@router.post("/api/auth/guest-login")
+async def guest_login(request: Request):
+    """游客登录：返回短生命周期 JWT（默认 2h），不创建 DB 记录。
+
+    限流由全局 auth 限流覆盖（5 requests / min / IP）。
+    """
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (
+        request.client.host if request.client else "unknown"
+    )
+    token = encode_guest_access_token(client_ip=client_ip)
+    logger.info(f"[AuthAPI] 游客登录: ip={client_ip}, token={token[:12]}...")
+
+    return {
+        "code": 200,
+        "msg": "游客登录成功",
+        "data": {
+            "token": token,
+            "access_token": token,
+            "refresh_token": "",
+            "user": {
+                "user_id": f"g_{token[:16]}",
+                "nickname": "访客",
+                "role": "guest",
+            },
+        },
+    }
+
+
 @router.post("/api/auth/login")
 async def login(req: LoginRequest):
     """邮箱密码登录"""
@@ -204,7 +234,7 @@ async def login(req: LoginRequest):
     password = req.password
 
     # WS6-C4 v2.2: 失败锁定检查
-    from core.login_lockout import is_locked, record_failure, record_success
+    from backend.core.login_lockout import is_locked, record_failure, record_success
     locked, retry_after = is_locked(email)
     if locked:
         raise HTTPException(
@@ -216,6 +246,7 @@ async def login(req: LoginRequest):
     user = authenticate_local(email=email, password=password)
     if not user:
         count = record_failure(email)
+        logger.warning(f"[AuthAPI] 登录失败: email={email}, failures={count}")
         if count >= 5:
             raise HTTPException(
                 status_code=429,
@@ -226,6 +257,7 @@ async def login(req: LoginRequest):
 
     record_success(email)
     update_last_login(user["id"])
+    logger.info(f"[AuthAPI] 登录成功: user={user['id']}, email={email}")
     access = encode_access_token(user["id"], user["role"])
     refresh = encode_refresh_token(user["id"], user["role"])
     return {
@@ -322,7 +354,7 @@ async def oauth_login(provider: str):
         authorize_url, state = google_oauth.build_authorize_url()
         return {"code": 200, "msg": "OK", "data": {"provider": "google", "authorize_url": authorize_url, "state": state}}
     except Exception as e:
-        logger.error(f"[AuthAPI] Google 授权 URL 构造失败: {e}")
+        logger.error(f"[AuthAPI] Google 授权 URL 构造失败: {e}", exc_info=True)
         return {"code": 500, "msg": f"Google OAuth 初始化失败: {e}", "data": None}
 
 
@@ -371,7 +403,7 @@ async def oauth_callback(provider: str, code: str, state: str = ""):
     try:
         userinfo = google_oauth.handle_callback(code, state=state)
     except OAuthExchangeError as e:
-        logger.error(f"[AuthAPI] Google OAuth 回调失败: {e}")
+        logger.error(f"[AuthAPI] Google OAuth 回调失败: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail={"code": 400, "msg": f"Google 登录失败: {e}", "data": None})
 
     google_sub = userinfo.get("sub")

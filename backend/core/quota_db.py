@@ -8,8 +8,8 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 
 logger = get_logger("core.quota")
 
@@ -165,7 +165,7 @@ def check_quota(owner_id: str, resource: str) -> tuple[bool, str]:
     """
     q = get_quota(owner_id)
     if resource == "subscription":
-        from core.subscription_db import count_subscriptions
+        from backend.core.subscription_db import count_subscriptions
         used = count_subscriptions(owner_id)
         max_n = q.get("max_subscriptions", DEFAULT_MAX_SUBSCRIPTIONS)
         if used >= max_n:

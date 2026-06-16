@@ -8,7 +8,7 @@ WS3: 安全加固中间件
 import json
 from typing import Callable, Awaitable
 from fastapi import FastAPI, Request, Response
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("core.security")
 
@@ -18,34 +18,15 @@ logger = get_logger("core.security")
 # ============================================================
 
 SECURITY_HEADERS = {
-    # 只允许同源加载资源（最严格的 CSP，API 服务无前端资源）
     "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-
-    # 禁止被嵌入 iframe（防点击劫持）
     "X-Frame-Options": "DENY",
-
-    # 禁止 MIME 类型嗅探（防 MIME 混淆攻击）
     "X-Content-Type-Options": "nosniff",
-
-    # 启用浏览器 XSS 过滤器（已弃用但仍广泛支持）
     "X-XSS-Protection": "0",
-
-    # 强制 HTTPS（生产环境有效，先发模式 1 年）
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
-
-    # 禁止自动检测 referrer
     "Referrer-Policy": "strict-origin-when-cross-origin",
-
-    # 限制跨域打开窗口的能力
     "Cross-Origin-Opener-Policy": "same-origin",
-
-    # 限制跨域资源嵌入
     "Cross-Origin-Resource-Policy": "same-origin",
-
-    # 限制跨域打开窗口访问 window.opener
     "Cross-Origin-Embedder-Policy": "require-corp",
-
-    # 禁止通过 HTTP Header 泄露服务器信息
     "Server": "",
 }
 
@@ -53,17 +34,26 @@ SECURITY_HEADERS = {
 def add_security_headers_middleware(app: FastAPI):
     """
     挂载安全响应头中间件并用默认值覆盖不安全响应头。
+    /docs /redoc /openapi.json 跳过 CSP（静态资源需要加载外部 JS/CSS）。
     """
+    _skip_csp_prefixes = ("/docs", "/redoc", "/openapi.json")
+
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]):
         response: Response = await call_next(request)
 
+        # Swagger / OpenAPI 页面需要加载外部 CDN 资源，跳过严格 CSP
+        path = request.url.path
+        if any(path == p or path.startswith(p + "/") or path.startswith(p) for p in _skip_csp_prefixes):
+            for header_to_remove in ("server", "x-powered-by"):
+                if header_to_remove in response.headers:
+                    del response.headers[header_to_remove]
+            return response
+
         for header_name, header_value in SECURITY_HEADERS.items():
-            # 不覆盖已存在（允许显式覆盖）
             if header_name not in response.headers:
                 response.headers[header_name] = header_value
 
-        # 移除常见的服务器信息泄露头
         for header_to_remove in ("server", "x-powered-by"):
             if header_to_remove in response.headers:
                 del response.headers[header_to_remove]
@@ -80,13 +70,8 @@ def add_security_headers_middleware(app: FastAPI):
 _MAX_BODY_SIZE = 1024 * 1024  # 1 MB
 
 def add_max_body_size_middleware(app: FastAPI, max_size: int = _MAX_BODY_SIZE):
-    """
-    挂载请求体大小限制中间件。
-    超过限制返回 413 Payload Too Large。
-    """
     @app.middleware("http")
     async def max_body_size_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]):
-        # 只对 POST/PUT/PATCH 方法检查
         if request.method in ("POST", "PUT", "PATCH"):
             content_length = request.headers.get("content-length", "0")
             try:
@@ -97,8 +82,7 @@ def add_max_body_size_middleware(app: FastAPI, max_size: int = _MAX_BODY_SIZE):
                         media_type="application/json",
                     )
             except (ValueError, TypeError):
-                pass  # 无 Content-Length 头的不拦截（由 Starlette 自行处理）
-
+                pass
         return await call_next(request)
 
     logger.info(f"[SecurityMiddleware] 请求体大小限制中间件已挂载 (max={max_size} bytes)")

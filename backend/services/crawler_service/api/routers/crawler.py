@@ -61,3 +61,39 @@ async def get_logs(limit: int = 100):
     """Get recent logs"""
     logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
     return {"logs": [log.model_dump() for log in logs]}
+
+
+@router.post("/{platform}/pause")
+async def pause_crawler(platform: str):
+    """暂停爬虫采集（当前页面完成后停止）"""
+    ok = await crawler_manager.pause()
+    return {"code": 200 if ok else 400, "msg": "已暂停" if ok else "不在运行中"}
+
+
+@router.post("/{platform}/resume")
+async def resume_crawler(platform: str):
+    """恢复已暂停的爬虫采集"""
+    ok = await crawler_manager.resume()
+    return {"code": 200 if ok else 400, "msg": "已恢复" if ok else "不在暂停状态"}
+
+
+@router.post("/{platform}/cancel")
+async def cancel_crawler(platform: str):
+    """优雅取消爬虫采集（等当前页面完成，超时 30s 后 SIGTERM）"""
+    ok = await crawler_manager.cancel()
+    return {"code": 200 if ok else 400, "msg": "已取消" if ok else "不在运行中"}
+
+
+@router.get("/heal/status")
+async def get_heal_status(platform: str = ""):
+    """获取爬虫自愈状态"""
+    if not hasattr(crawler_manager, '_healer'):
+        return {"events": [], "platforms": {}}
+    healer = crawler_manager._healer
+    return {
+        "events": healer.get_history(platform=platform, limit=20),
+        "platforms": {
+            p: healer.get_platform_health(p)
+            for p in ["xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu"]
+        },
+    }

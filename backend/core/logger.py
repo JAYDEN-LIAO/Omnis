@@ -8,7 +8,7 @@ import threading
 from datetime import datetime
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from typing import Optional, Dict, Any
-from core.config import settings
+from backend.core.config import settings
 
 
 # ==================== WS3.4: 日志敏感数据脱敏 ====================
@@ -73,7 +73,7 @@ class TraceIdFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            from core.context import get_trace_id
+            from backend.core.context import get_trace_id
             tid = get_trace_id() or ""
         except Exception:
             tid = ""

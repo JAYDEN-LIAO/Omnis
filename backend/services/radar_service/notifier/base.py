@@ -1,6 +1,6 @@
 # backend/services/radar_service/notifier/base.py
 from abc import ABC, abstractmethod
-from core.logger import get_logger
+from backend.core.logger import get_logger
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 
 logger = get_logger("notifier.base")

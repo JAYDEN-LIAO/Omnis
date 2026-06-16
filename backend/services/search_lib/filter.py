@@ -6,15 +6,9 @@ filter.py — 搜索结果过滤 + 摘要生成
 """
 import asyncio
 import json
-import os
-import sys
 from typing import Optional
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if BASE_DIR not in sys.path:
-    sys.path.append(BASE_DIR)
-
-from core.logger import get_logger
+from backend.core.logger import get_logger
 
 logger = get_logger("search.filter")
 

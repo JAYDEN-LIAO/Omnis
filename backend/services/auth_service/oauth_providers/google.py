@@ -17,8 +17,8 @@ from urllib.parse import urlencode
 
 import httpx
 
-from core.config import settings
-from core.logger import get_logger
+from backend.core.config import settings
+from backend.core.logger import get_logger
 
 logger = get_logger("auth.oauth.google")
 

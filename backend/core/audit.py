@@ -11,7 +11,7 @@ v2.2 P0#9 修复：跨服务 import 失败不再静默降级
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
-from core.logger import get_audit_logger
+from backend.core.logger import get_audit_logger
 
 
 # ==================== P0#9：DB 审计落库降级状态 ====================

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
+import { GuestBanner } from '@/components/layout/guest-banner';
 import { isAuthenticated } from '@/lib/auth-client';
 import { useSidebarStore } from '@/stores/sidebar-store';
 
@@ -40,6 +41,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         style={{ marginLeft: sidebarWidth, transition: 'margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1)' }}
       >
         <Topbar />
+        <GuestBanner />
         <div className="p-6 md:p-8">{children}</div>
       </main>
     </div>

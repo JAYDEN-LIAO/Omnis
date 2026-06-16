@@ -6,8 +6,8 @@ v2.2：模型配置表 CRUD（per-user，5 个 Agent 角色）
 from datetime import datetime
 from typing import Optional
 
-from core.database import get_db_connection
-from core.logger import get_logger
+from backend.core.database import get_db_connection
+from backend.core.logger import get_logger
 
 logger = get_logger("core.modelcfg")
 
@@ -158,7 +158,7 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
     """
     user_cfg = get_model_config(owner_id, agent_role)
     # 系统默认从 settings 读（沿用现有 config.py 的 DEFAULT_* 字段）
-    from core.config import settings
+    from backend.core.config import settings
 
     def _field(name: str) -> str:
         # 优先 user 配置

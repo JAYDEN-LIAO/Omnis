@@ -2,7 +2,7 @@
 v2.2：配额 FastAPI 中间件（依赖注入）
 
 用法：
-    from core.quota import enforce_quota
+    from backend.core.quota import enforce_quota
 
     @router.post("/api/subscriptions", dependencies=[Depends(enforce_quota("subscription"))])
     def create_subscription(...):
@@ -10,8 +10,8 @@ v2.2：配额 FastAPI 中间件（依赖注入）
 """
 from fastapi import Depends, HTTPException, status
 
-from core.auth_deps import get_current_user
-from core.quota_db import check_quota
+from backend.core.auth_deps import get_current_user
+from backend.core.quota_db import check_quota
 
 
 def enforce_quota(resource: str):

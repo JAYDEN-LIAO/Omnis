@@ -5,6 +5,7 @@ Agent Core - 单次异步流式主循环
 架构：TokenBudgetManager → AgentMemory → ToolExecutor
 """
 import json
+import threading
 import time
 import uuid
 import asyncio
@@ -13,7 +14,7 @@ from typing import Optional
 from openai import OpenAI, AsyncOpenAI
 from core.config import settings, get_agent_config
 from core.logger import get_logger
-from core.metrics import (
+from backend.core.metrics import (
     AGENT_TURNS,
     AGENT_TOOL_CALLS,
     AGENT_TOOL_LATENCY,
@@ -387,6 +388,48 @@ async def phase_finish(ctx: AgentContext, final_text: str = ""):
     ))
 
 
+# ──────────────── CancelRegistry: Session 级取消 ────────────────
+
+
+class CancelRegistry:
+    """取消注册表：每个 session 一个 asyncio.Event，支持跨协程取消。"""
+
+    def __init__(self):
+        self._events: dict = {}
+        self._lock = threading.Lock()
+
+    def register(self, session_id: str):
+        event = asyncio.Event()
+        with self._lock:
+            self._events[session_id] = event
+
+    def unregister(self, session_id: str):
+        with self._lock:
+            self._events.pop(session_id, None)
+
+    def cancel(self, session_id: str) -> bool:
+        """触发取消事件。返回 True 表示有效取消。"""
+        with self._lock:
+            event = self._events.get(session_id)
+            if event:
+                event.set()
+                return True
+        return False
+
+    async def wait_or_raise(self, session_id: str, step: str = ""):
+        """在 Agent 主循环的关键检查点调用，被取消时抛 CancelledError。"""
+        with self._lock:
+            event = self._events.get(session_id)
+        if event and event.is_set():
+            raise asyncio.CancelledError(f"用户取消了 {step}")
+
+
+cancel_registry = CancelRegistry()
+
+
+# ──────────────── 主循环 ────────────────
+
+
 async def chat_with_agent_stream(
     messages: list,
     session_id: str = None,
@@ -414,148 +457,189 @@ async def chat_with_agent_stream(
     # 先返回 session_id（前端必须知道这个才能保持同一会话）
     yield emit_session(ctx.session_id)
 
-    for i in range(ctx.max_iterations):
-        ctx.iteration = i
-        logger.info(f"[Agent Core] 第 {i+1} 轮")
-        AGENT_TURNS.inc()
+    cancel_registry.register(ctx.session_id)
 
-        # ── 单次异步流式 LLM 调用（取代 phase_think + phase_respond 双阶段）──
-        try:
-            key, url, model = _get_agent_config_for(ctx.owner_id)
-            client = AsyncOpenAI(api_key=key, base_url=url)
+    try:
+        for i in range(ctx.max_iterations):
+            ctx.iteration = i
+            logger.info(f"[Agent Core] 第 {i+1} 轮")
+            AGENT_TURNS.inc()
 
-            stream = await client.chat.completions.create(
-                model=model or settings.DEFAULT_MODEL,
-                messages=ctx.current_messages,
-                tools=TOOLS_SCHEMA,
-                tool_choice="auto",
-                stream=True,
-            )
+            # ── 打断检查点 ──
+            await cancel_registry.wait_or_raise(ctx.session_id, "iteration_start")
 
-            content_parts = []
-            tool_call_deltas = {}
+            # ── 单次异步流式 LLM 调用 ──
+            try:
+                key, url, model = _get_agent_config_for(ctx.owner_id)
+                client = AsyncOpenAI(api_key=key, base_url=url)
 
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if not delta:
-                    continue
+                stream = await client.chat.completions.create(
+                    model=model or settings.DEFAULT_MODEL,
+                    messages=ctx.current_messages,
+                    tools=TOOLS_SCHEMA,
+                    tool_choice="auto",
+                    stream=True,
+                )
 
-                # 文本内容 → 直接流式 emit
-                if delta.content:
-                    content_parts.append(delta.content)
-                    if ctx.text_collector is not None:
-                        ctx.text_collector.append(delta.content)
-                    yield emit_text(delta.content)
+                content_parts = []
+                tool_call_deltas = {}
 
-                # 工具调用 → 累加 delta（stream 中每个 chunk 只携带部分数据）
-                if delta.tool_calls:
-                    for tc_delta in delta.tool_calls:
-                        idx = tc_delta.index
-                        if idx not in tool_call_deltas:
-                            tool_call_deltas[idx] = {
-                                "id": tc_delta.id or "",
-                                "name": tc_delta.function.name or "",
-                                "arguments": tc_delta.function.arguments or "",
-                            }
-                        else:
-                            existing = tool_call_deltas[idx]
-                            if tc_delta.id:
-                                existing["id"] = tc_delta.id
-                            if tc_delta.function:
-                                if tc_delta.function.name:
-                                    existing["name"] += tc_delta.function.name
-                                if tc_delta.function.arguments:
-                                    existing["arguments"] += tc_delta.function.arguments
-
-            # ── 判断响应类型 ──
-            if tool_call_deltas:
-                # 构建 assistant 消息（含 tool_calls）加入上下文
-                full_content = "".join(content_parts) if content_parts else None
-                sorted_indices = sorted(tool_call_deltas.keys())
-                tool_calls = []
-                for idx in sorted_indices:
-                    tc = tool_call_deltas[idx]
-                    tool_calls.append({
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": tc["arguments"],
-                        },
-                    })
-
-                assistant_msg = {"role": "assistant", "content": full_content}
-                if tool_calls:
-                    assistant_msg["tool_calls"] = tool_calls
-                ctx.current_messages.append(assistant_msg)
-
-                # 执行每个工具
-                for tc_data in tool_calls:
-                    tc_obj = SimpleNamespace(
-                        id=tc_data["id"] or f"call_{uuid.uuid4().hex[:8]}",
-                        function=SimpleNamespace(
-                            name=tc_data["function"]["name"],
-                            arguments=tc_data["function"]["arguments"],
-                        ),
-                    )
-                    parsed = None
-                    gen = phase_act(ctx, tc_obj)
-                    try:
-                        while True:
-                            chunk = await gen.__anext__()
-                            if isinstance(chunk, dict) and _PHASE_ACT_DONE_MARKER in chunk:
-                                parsed = chunk[_PHASE_ACT_DONE_MARKER]
-                                break
-                            yield chunk
-                    except Exception as e:
-                        logger.error(f"[MainLoop] phase_act 异常: {e}", exc_info=True)
-                        yield emit_error(f"工具执行异常: {e}", error_type="tool_execution_error", call_id=tc_data["id"])
-                        parsed = None
-
-                    if parsed is None:
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if not delta:
                         continue
 
-                    # 工具结果入上下文
-                    ctx.current_messages.append({
-                        "tool_call_id": tc_data["id"],
-                        "role": "tool",
-                        "name": tc_data["function"]["name"],
-                        "content": json.dumps(parsed, ensure_ascii=False),
-                    })
+                    # 文本内容 → 直接流式 emit
+                    if delta.content:
+                        content_parts.append(delta.content)
+                        if ctx.text_collector is not None:
+                            ctx.text_collector.append(delta.content)
+                        try:
+                            yield emit_text(delta.content)
+                        except GeneratorExit:
+                            # 前端断开连接 → 关闭流，走统一收尾
+                            logger.info(f"[Agent] 前端断开，关闭 LLM stream (session={ctx.session_id[:8]})")
+                            await stream.close()
+                            raise
 
-                # Token 预算检查
-                try:
-                    if token_budget_manager.should_summarize(ctx.current_messages):
-                        ctx.current_messages = token_budget_manager.summarize_history(ctx.current_messages)
-                except Exception as e:
-                    logger.warning(f"[Agent] Token 预算检查失败: {e}")
+                    # 工具调用 → 累加 delta
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_call_deltas:
+                                tool_call_deltas[idx] = {
+                                    "id": tc_delta.id or "",
+                                    "name": tc_delta.function.name or "",
+                                    "arguments": tc_delta.function.arguments or "",
+                                }
+                            else:
+                                existing = tool_call_deltas[idx]
+                                if tc_delta.id:
+                                    existing["id"] = tc_delta.id
+                                if tc_delta.function:
+                                    if tc_delta.function.name:
+                                        existing["name"] += tc_delta.function.name
+                                    if tc_delta.function.arguments:
+                                        existing["arguments"] += tc_delta.function.arguments
 
-                # 增量写入：每 4 轮 checkpoint 聊天消息（轻量，不含 LLM 抽取）
-                if ctx.iteration > 0 and ctx.iteration % 4 == 0:
-                    asyncio.create_task(
-                        memory_manager.store.replace_messages(
-                            ctx.session_id, ctx.owner_id, list(ctx.messages)
+                # ── 判断响应类型 ──
+                if tool_call_deltas:
+                    # 构建 assistant 消息（含 tool_calls）加入上下文
+                    full_content = "".join(content_parts) if content_parts else None
+                    sorted_indices = sorted(tool_call_deltas.keys())
+                    tool_calls = []
+                    for idx in sorted_indices:
+                        tc = tool_call_deltas[idx]
+                        tool_calls.append({
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": tc["arguments"],
+                            },
+                        })
+
+                    assistant_msg = {"role": "assistant", "content": full_content}
+                    if tool_calls:
+                        assistant_msg["tool_calls"] = tool_calls
+                    ctx.current_messages.append(assistant_msg)
+
+                    # 执行每个工具
+                    for tc_data in tool_calls:
+                        tc_obj = SimpleNamespace(
+                            id=tc_data["id"] or f"call_{uuid.uuid4().hex[:8]}",
+                            function=SimpleNamespace(
+                                name=tc_data["function"]["name"],
+                                arguments=tc_data["function"]["arguments"],
+                            ),
                         )
-                    )
+                        parsed = None
+                        gen = phase_act(ctx, tc_obj)
+                        try:
+                            while True:
+                                chunk = await gen.__anext__()
+                                if isinstance(chunk, dict) and _PHASE_ACT_DONE_MARKER in chunk:
+                                    parsed = chunk[_PHASE_ACT_DONE_MARKER]
+                                    break
+                                try:
+                                    yield chunk
+                                except GeneratorExit:
+                                    await gen.aclose()
+                                    logger.info(f"[Agent] 工具 {tc_data['function']['name']} 执行被取消")
+                                    raise
+                        except GeneratorExit:
+                            # 工具执行阶段前端断开
+                            logger.info(f"[Agent] 工具执行阶段前端断开 (session={ctx.session_id[:8]})")
+                            raise
+                        except Exception as e:
+                            logger.error(f"[MainLoop] phase_act 异常: {e}", exc_info=True)
+                            yield emit_error(f"工具执行异常: {e}", error_type="tool_execution_error", call_id=tc_data["id"])
+                            parsed = None
 
-                continue  # 下一轮迭代
+                        if parsed is None:
+                            continue
 
-            # 没有工具调用 → 流式内容已 emit，直接收尾
-            async for chunk in phase_finish(ctx):
-                yield chunk
-            return
+                        # 工具结果入上下文
+                        ctx.current_messages.append({
+                            "tool_call_id": tc_data["id"],
+                            "role": "tool",
+                            "name": tc_data["function"]["name"],
+                            "content": json.dumps(parsed, ensure_ascii=False),
+                        })
 
-        except Exception as e:
-            logger.error(f"[Agent] LLM 调用失败: {e}", exc_info=True)
-            async for chunk in phase_finish(ctx, "抱歉，处理出错，请稍后重试。"):
-                yield chunk
-            return
+                    # Token 预算检查
+                    try:
+                        if token_budget_manager.should_summarize(ctx.current_messages):
+                            ctx.current_messages = token_budget_manager.summarize_history(ctx.current_messages)
+                    except Exception as e:
+                        logger.warning(f"[Agent] Token 预算检查失败: {e}")
 
-    # 超过最大迭代次数
-    async for chunk in phase_finish(ctx, "抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。"):
-        yield chunk
+                    # 增量写入：每 4 轮 checkpoint
+                    if ctx.iteration > 0 and ctx.iteration % 4 == 0:
+                        asyncio.create_task(
+                            memory_manager.store.replace_messages(
+                                ctx.session_id, ctx.owner_id, list(ctx.messages)
+                            )
+                        )
+
+                    continue  # 下一轮迭代
+
+                # 没有工具调用 → 流式内容已 emit，直接收尾
+                async for chunk in phase_finish(ctx):
+                    yield chunk
+                return
+
+            except GeneratorExit:
+                # 前端在 LLM 流式阶段断开
+                logger.info(f"[Agent] 前端断开 (session={ctx.session_id[:8]})")
+                yield emit_done()
+                asyncio.create_task(_write_memory_async(
+                    ctx.session_id, ctx.messages, ctx.owner_id, ctx.text_collector
+                ))
+                return
+
+            except Exception as e:
+                logger.error(f"[Agent] LLM 调用失败: {e}", exc_info=True)
+                async for chunk in phase_finish(ctx, "抱歉，处理出错，请稍后重试。"):
+                    yield chunk
+                return
+
+        # 超过最大迭代次数
+        async for chunk in phase_finish(ctx, "抱歉，处理该指令时逻辑过于复杂，已自动中止。请换个问法。"):
+            yield chunk
+
+    except GeneratorExit:
+        # 统一打断处理：保留已有上下文，标记 done
+        logger.info(f"[Agent] 会话 {ctx.session_id[:8]} 被打断")
+        yield emit_done()
+        asyncio.create_task(_write_memory_async(
+            ctx.session_id, ctx.messages, ctx.owner_id, ctx.text_collector
+        ))
+        return
+    finally:
+        cancel_registry.unregister(ctx.session_id)
 
 
 async def _write_memory_async(

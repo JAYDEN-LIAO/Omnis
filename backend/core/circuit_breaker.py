@@ -1,7 +1,8 @@
 """Circuit Breaker 实现 — 防止 LLM 服务雪崩"""
 import time
+import threading
 from enum import Enum
-from core.metrics import CIRCUIT_BREAKER_STATE
+from backend.core.metrics import CIRCUIT_BREAKER_STATE
 
 class CircuitState(Enum):
     CLOSED = "closed"
@@ -28,23 +29,27 @@ class CircuitBreaker:
         self._failures = 0
         self._state = CircuitState.CLOSED
         self._last_failure_time: float = 0
+        self._lock = threading.Lock()  # Fix 3.3: 线程安全
         # 初始化 gauge
         CIRCUIT_BREAKER_STATE.labels(name=self.name).set(_STATE_TO_GAUGE[self._state])
 
     def call(self, fn, *args, **kwargs):
-        """同步调用，受熔断保护"""
-        if self._state == CircuitState.OPEN:
-            if time.time() - self._last_failure_time > self.recovery_timeout:
-                self._set_state(CircuitState.HALF_OPEN)
-            else:
-                raise CircuitBreakerOpen(f"Circuit {self.name} is OPEN (retry after {self.recovery_timeout}s)")
+        """同步调用，受熔断保护（线程安全）"""
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                if time.time() - self._last_failure_time > self.recovery_timeout:
+                    self._set_state(CircuitState.HALF_OPEN)
+                else:
+                    raise CircuitBreakerOpen(f"Circuit {self.name} is OPEN (retry after {self.recovery_timeout}s)")
 
         try:
             result = fn(*args, **kwargs)
-            self._on_success()
+            with self._lock:
+                self._on_success()
             return result
         except Exception as e:
-            self._on_failure()
+            with self._lock:
+                self._on_failure()
             raise e
 
     def _set_state(self, new_state: CircuitState):
