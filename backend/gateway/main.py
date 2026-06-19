@@ -39,7 +39,7 @@ from backend.services.auth_service.api import router as auth_router  # WS4: 多�
 from backend.services.subscription_service.api import router as subscription_router  # v2.2: 订阅/模型/配额/admin
 from backend.services.admin_service.api import router as admin_monitor_router  # Admin Agent 监控
 
-# 触发 agent_service 模块加载，确保其 Counter/Histogram 已注册到 prometheus 默认注册表
+# 触发 agent_service 加载，确保其 Counter/Histogram 已注册到 prometheus 默认注册表
 import backend.services.agent_service.agent_core  # noqa: F401
 
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
