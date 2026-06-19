@@ -8,15 +8,18 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ======== 前端构建 ========
+      # ======== 前端构建（带 npm 缓存）========
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
 
       - name: Install dependencies
         run: cd frontend/web && npm ci
@@ -38,7 +41,7 @@ jobs:
           rm: true
           overwrite: true
 
-      # ======== 后端同步（git pull）+ 重启 ========
+      # ======== 后端同步 + 优雅重启 ========
       - name: Sync backend and restart gunicorn
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -47,11 +50,57 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -e
             cd /www/wwwroot/omnis_backend
+
+            # 拉取最新代码
             GIT_SSH_COMMAND="ssh -F ~/.ssh/config_omnis" git fetch origin main
             GIT_SSH_COMMAND="ssh -F ~/.ssh/config_omnis" git reset --hard origin/main
-            # 更新依赖（仅 requirements.txt 变化时有效）
+
+            # 更新 Python 依赖
             source venv/bin/activate
-            pip install -r requirements.txt --quiet
-            # 重启 gunicorn worker（不中断服务）
-            kill -HUP $(cat gunicorn.pid 2>/dev/null || ps aux | grep 'gunicorn.*main:app' | grep -v grep | head -1 | awk '{print $2}')
+            pip install -r requirements.txt --quiet --no-python-version-warning
+
+            # 重启 gunicorn — 优先 HUP 优雅重启，失败则冷启动
+            if [ -f gunicorn.pid ] && kill -0 "$(cat gunicorn.pid)" 2>/dev/null; then
+              kill -HUP "$(cat gunicorn.pid)"
+              echo "✅ gunicorn 优雅重启成功 (PID $(cat gunicorn.pid))"
+            else
+              echo "⚠️  gunicorn.pid 无效或不存在，执行冷启动..."
+              # 清理残留的 gunicorn 进程
+              pkill -f "gunicorn.*main:app" 2>/dev/null || true
+              sleep 1
+              # 以 www 用户启动
+              su -s /bin/bash -c '
+                cd /www/wwwroot/omnis_backend
+                source venv/bin/activate
+                nohup venv/bin/gunicorn backend.gateway.main:app \
+                  --workers 2 \
+                  --worker-class uvicorn.workers.UvicornWorker \
+                  --bind 0.0.0.0:8010 \
+                  --timeout 120 \
+                  --pid /www/wwwroot/omnis_backend/gunicorn.pid \
+                  > /dev/null 2>&1 &
+              ' www
+              echo "✅ gunicorn 冷启动完成"
+            fi
+
+      # ======== 健康检查 ========
+      - name: Health check
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            for i in $(seq 1 10); do
+              sleep 2
+              if curl -sf http://localhost:8010/health > /dev/null 2>&1; then
+                echo "✅ 服务健康检查通过"
+                exit 0
+              fi
+              echo "⏳ 等待服务启动... ($i/10)"
+            done
+            echo "❌ 健康检查失败，部署可能有问题"
+            exit 1
