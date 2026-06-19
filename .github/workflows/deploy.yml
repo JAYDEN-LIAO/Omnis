@@ -28,6 +28,17 @@ jobs:
         run: cd frontend/web && STATIC_EXPORT=true npm run build
 
       # ======== 上传前端静态文件 ========
+      - name: Clean frontend target directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            rm -rf /www/wwwroot/omnis.jaydennn.xyz/* /www/wwwroot/omnis.jaydennn.xyz/.[!.]*
+            echo "✅ 前端目录已清空"
+
       - name: Upload frontend to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -35,10 +46,9 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "frontend/web/out/*"
+          source: "frontend/web/out/"
           target: "/www/wwwroot/omnis.jaydennn.xyz"
-          strip_components: 3
-          rm: true
+          strip_components: 2
           overwrite: true
 
       # ======== 后端同步 + 优雅重启 ========
