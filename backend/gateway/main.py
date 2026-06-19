@@ -41,7 +41,7 @@ from backend.services.admin_service.api import router as admin_monitor_router  #
 
 # 触发 agent_service 加载，确保其 Counter/Histogram 已注册到 prometheus 默认注册表
 import backend.services.agent_service.agent_core  # noqa: F401
-
+ 
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from backend.core.config import settings
