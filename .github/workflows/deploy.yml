@@ -28,6 +28,18 @@ jobs:
         run: cd frontend/web && STATIC_EXPORT=true npm run build
 
       # ======== 上传前端静态文件 ========
+      - name: Clean and upload frontend
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            chattr -i /www/wwwroot/omnis.jaydennn.xyz/.user.ini 2>/dev/null || true
+            rm -rf /www/wwwroot/omnis.jaydennn.xyz
+            mkdir -p /www/wwwroot/omnis.jaydennn.xyz
+
       - name: Upload frontend to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -36,11 +48,11 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "frontend/web/out/"
-          target: "/tmp/omnis-frontend"
-          strip_components: 2
+          target: "/www/wwwroot/omnis.jaydennn.xyz"
+          strip_components: 3
           overwrite: true
 
-      - name: Move frontend files to web root
+      - name: Fix frontend permissions
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -48,11 +60,8 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            rm -rf /www/wwwroot/omnis.jaydennn.xyz
-            mv /tmp/omnis-frontend/out /www/wwwroot/omnis.jaydennn.xyz
             chown -R www:www /www/wwwroot/omnis.jaydennn.xyz
-            rm -rf /tmp/omnis-frontend
-            echo "✅ 前端文件已部署到网站根目录"
+            echo "✅ 前端部署完成"
             ls -la /www/wwwroot/omnis.jaydennn.xyz/ | head -5
 
       # ======== 后端同步 + 优雅重启 ========
