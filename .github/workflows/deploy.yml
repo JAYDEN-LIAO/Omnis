@@ -28,17 +28,6 @@ jobs:
         run: cd frontend/web && STATIC_EXPORT=true npm run build
 
       # ======== 上传前端静态文件 ========
-      - name: Clean frontend target directory
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            rm -rf /www/wwwroot/omnis.jaydennn.xyz/* /www/wwwroot/omnis.jaydennn.xyz/.[!.]*
-            echo "✅ 前端目录已清空"
-
       - name: Upload frontend to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -47,9 +36,24 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "frontend/web/out/"
-          target: "/www/wwwroot/omnis.jaydennn.xyz"
+          target: "/tmp/omnis-frontend"
           strip_components: 2
           overwrite: true
+
+      - name: Move frontend files to web root
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            rm -rf /www/wwwroot/omnis.jaydennn.xyz
+            mv /tmp/omnis-frontend/out /www/wwwroot/omnis.jaydennn.xyz
+            chown -R www:www /www/wwwroot/omnis.jaydennn.xyz
+            rm -rf /tmp/omnis-frontend
+            echo "✅ 前端文件已部署到网站根目录"
+            ls -la /www/wwwroot/omnis.jaydennn.xyz/ | head -5
 
       # ======== 后端同步 + 优雅重启 ========
       - name: Sync backend and restart gunicorn
