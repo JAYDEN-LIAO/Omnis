@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { mainNav } from './sidebar-nav';
 import { useSidebarStore } from '@/stores/sidebar-store';
+import pkg from '@/package.json';
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -15,7 +17,7 @@ export function Sidebar() {
     return pathname === href;
   };
 
-  const sidebarWidth = collapsed ? 80 : 280;
+  const sidebarWidth = collapsed ? 80 : 168;
 
   return (
     <>
@@ -40,21 +42,25 @@ export function Sidebar() {
         </button>
 
         {/* Brand */}
-        <div className="px-6 mb-12 flex items-center gap-3">
-          <div className="w-8 h-8 shrink-0 rounded-lg brushed-gold flex items-center justify-center brushed-gold-text">
-            <span className="material-symbols-outlined text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>hub</span>
+        <div className={`mb-2 flex items-center h-20 ${collapsed ? 'pl-3 pr-6' : 'pl-3 pr-6 gap-3'}`}>
+          {/* Logo — same left offset in both states */}
+          <div className="shrink-0 flex items-center justify-center">
+            <Image
+              src="/logo.svg"
+              alt="Omnis"
+              width={52}
+              height={28}
+              priority
+              unoptimized
+            />
           </div>
-          <div className={`sidebar-logo-text overflow-hidden whitespace-nowrap ${collapsed ? '' : ''}`}>
-            <h1 className="serif-headline text-[20px] font-bold tracking-tight leading-tight" style={{ color: 'var(--on-surface)' }}>
-              Omnis
-            </h1>
-            <div className="flex items-center gap-2">
-              <p className="text-[9px] label-caps" style={{ color: 'var(--on-surface-variant)', opacity: 0.6 }}>AI 分析师 Alpha</p>
-              <span className="text-[7px] label-caps px-1.5 py-0.5 rounded border" style={{ borderColor: 'oklch(0.78 0.16 85 / 0.3)', color: 'var(--primary-gold)' }}>
-                v2.4.0
-              </span>
-            </div>
-          </div>
+
+          {/* Version badge — only when expanded */}
+          {!collapsed && (
+            <span className="text-[7px] label-caps px-1.5 py-0.5 rounded border shrink-0" style={{ borderColor: 'oklch(0.78 0.16 85 / 0.3)', color: 'var(--primary-gold)' }}>
+              {`v${pkg.version}`}
+            </span>
+          )}
         </div>
 
         {/* Main navigation */}

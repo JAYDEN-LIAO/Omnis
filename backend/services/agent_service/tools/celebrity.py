@@ -23,18 +23,21 @@ logger = get_logger("agent.tools.celebrity")
     description="查询明星/偶像追星分析报告（情感分布/热度趋势/跨平台对比）",
     group="query",
     parameters={
-        "celebrity": {
-            "type": "string",
-            "description": "明星姓名（可选，筛选用）",
-        },
-        "keyword": {
-            "type": "string",
-            "description": "关键词（可选）",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "返回条数上限",
-            "default": 10,
+        "type": "object",
+        "properties": {
+            "celebrity": {
+                "type": "string",
+                "description": "明星姓名（可选，筛选用）",
+            },
+            "keyword": {
+                "type": "string",
+                "description": "关键词（可选）",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "返回条数上限",
+                "default": 10,
+            },
         },
     },
 )

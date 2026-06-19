@@ -23,18 +23,21 @@ logger = get_logger("agent.tools.guide")
     description="查询攻略分析报告（支持按关键词/话题筛选）",
     group="query",
     parameters={
-        "keyword": {
-            "type": "string",
-            "description": "关键词（可选，筛选用）",
-        },
-        "topic": {
-            "type": "string",
-            "description": "话题名（可选，筛选用）",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "返回条数上限",
-            "default": 10,
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "关键词（可选，筛选用）",
+            },
+            "topic": {
+                "type": "string",
+                "description": "话题名（可选，筛选用）",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "返回条数上限",
+                "default": 10,
+            },
         },
     },
 )

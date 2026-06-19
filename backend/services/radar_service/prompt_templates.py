@@ -387,3 +387,69 @@ ANALYST_PROMPT_WITH_EVOLUTION = """你是一位资深且敏锐的企业舆情风
     "risk_level": <1到5的整数>,
     "core_issue": "如果 risk_level >= 3，请用15字以内高度概括核心问题；若无风险，填 '无'"
 }}"""
+
+# ============================================================
+# v2.0 P2: 四维智能规划 Prompt
+# ============================================================
+
+PLAN_PROMPT = """你是一个任务规划专家。先分析用户意图和约束条件，再拆解执行步骤。
+
+当前可用的核心工具：
+{tools}
+
+用户问题：{user_message}
+
+请输出 JSON（不要其他内容）：
+{{
+  "goal": "一句话描述最终目标",
+  "mode": "immediate",
+  "constraints": {{
+    "budget_max": "预算上限(数字，无则为null)",
+    "accessibility": "elderly_friendly|wheelchair|normal",
+    "exclude": ["排除项列表"],
+    "duration": "时间跨度(如'3天')",
+    "preferred_platforms": ["优先平台列表"],
+    "language": "zh|en"
+  }},
+  "steps": [
+    {{
+      "step": 1,
+      "description": "这一步要做什么",
+      "tool": "工具名",
+      "criticality": "critical|required|optional",
+      "why": "为什么需要这一步"
+    }}
+  ]
+}}
+
+规则：
+- 简单问题（直接回答即可）→ steps 为空数组，constraints 全部为 null/空
+- 复杂问题 → 拆为 2-5 步
+- 如果用户提到"定时""定期""每天早上"等，mode 改为 "scheduled"，增加 "schedule" 字段：
+  {{"cron": "cron表达式", "description": "触发时机描述"}}
+- criticality 标注原则：
+  critical = 数据采集步骤（后面步骤依赖其结果），失败时直接终止
+  required = 核心分析步骤，失败时重试 2 次后降级跳过
+  optional = 推送/格式化步骤，失败不影响主流程
+- 约束提取：从用户输入中抽取限制条件，无则填 null/空数组
+- 只输出 JSON，不要解释"""
+
+PLAN_ADJUST_PROMPT = """你是任务规划修正专家。原计划执行到某一步时结果异常，需要调整后续步骤。
+
+原计划：{original_plan}
+第 {failed_step} 步执行失败，结果：{failed_result}
+异常原因：{anomaly_reason}
+剩余步骤：{remaining_steps}
+
+输出 JSON：
+{{
+  "note": "一句话说明调整原因",
+  "adjusted_steps": [
+    {{"step": 1, "description": "...", "tool": "...", "criticality": "required", "why": "..."}}
+  ]
+}}
+
+调整原则：
+- 优先尝试替代方案（换平台、放宽参数）而非直接放弃
+- 如果确实是数据不存在，标记为 critical 终止并向用户报告
+- 最多调整 2 次"""

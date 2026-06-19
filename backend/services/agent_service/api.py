@@ -10,7 +10,7 @@ Agent Chat API（v2.2 P1.10 接 auth + owner_id 注入）
 """
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -162,6 +162,37 @@ async def cancel_agent_stream(
     """取消指定 session 当前正在执行的 Agent 流。"""
     cancelled = cancel_registry.cancel(session_id)
     return {"code": 200, "data": {"cancelled": cancelled}}
+
+
+# ==================== v2.0 P4: 工作流取消 ====================
+
+
+@router.post("/api/agent/workflows/{workflow_id}/cancel")
+async def cancel_workflow_endpoint(
+    workflow_id: int,
+    current_user: Dict = Depends(require_registered_user),
+):
+    """取消正在执行的工作流（仅本人工作流）。
+
+    ★ R-012 修订：owner 权限校验，用户 A 不能取消用户 B 的工作流。
+    """
+    owner_id = str(current_user["id"])
+
+    from backend.services.agent_service.workflows_db import WorkflowsDB
+    db = WorkflowsDB()
+    wf = db.get_by_id(workflow_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail={"code": 404, "msg": "工作流不存在"})
+    if wf["owner_id"] != owner_id and wf["owner_id"] != "system":
+        raise HTTPException(status_code=403, detail={"code": 403, "msg": "无权操作他人工作流"})
+
+    from backend.services.radar_service.scheduler import _WF_CANCEL_EVENTS, _WF_CANCEL_LOCK
+    with _WF_CANCEL_LOCK:
+        event = _WF_CANCEL_EVENTS.get(workflow_id)
+        if event:
+            event.set()
+            return {"code": 200, "data": {"cancelled": True}}
+    return {"code": 404, "data": {"cancelled": False, "message": "工作流未在运行"}}
 
 
 @router.delete("/api/agent/memory/{session_id}")

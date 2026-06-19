@@ -90,3 +90,21 @@ class ToolResult(BaseModel):
 
     def to_json(self) -> str:
         return self.model_dump_json()
+
+
+# ============================================================
+# v2.0 P1: cancel_event contextvar（跨线程 cron 调度用）
+# ============================================================
+import contextvars
+
+_current_cancel_event: contextvars.ContextVar[Optional[asyncio.Event]] = contextvars.ContextVar(
+    "mediaradar_current_cancel_event", default=None
+)
+
+
+def set_current_cancel_event(event: Optional[asyncio.Event]):
+    return _current_cancel_event.set(event)
+
+
+def get_current_cancel_event() -> Optional[asyncio.Event]:
+    return _current_cancel_event.get()

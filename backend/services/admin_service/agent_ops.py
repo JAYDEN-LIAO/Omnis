@@ -161,7 +161,14 @@ class AgentOpsEngine:
     # ──────────────── 核心能力 3：自然语言查询 ────────────────
 
     async def chat_query(self, question: str, admin_id: str = "") -> str:
-        """Admin 自然语言查询：采集当前全量指标作为上下文，LLM 回答"""
+        """Admin 自然语言查询（★ 弱点4 增强版：注入工作流上下文）"""
+        return await self.chat_query_enhanced(question, admin_id)
+
+    async def chat_query_enhanced(self, question: str, admin_id: str = "") -> str:
+        """Admin 自然语言查询（弱点4 增强版）。
+
+        从问题中识别工作流 ID，注入该工作流的详细执行历史和趋势。
+        """
         if not question.strip():
             return "请描述你想了解的问题。"
 
@@ -172,9 +179,63 @@ class AgentOpsEngine:
 
         context = self._build_health_context(overview, tools, [],
                                              recent_diag, baseline)
+        extra = self._extract_workflow_context(question)
+        if extra:
+            context += extra
         prompt = self._chat_prompt(context, question)
         result = await self._call_llm(prompt)
         return result or "抱歉，暂时无法回答这个问题，请稍后重试。"
+
+    def _extract_workflow_context(self, question: str) -> str:
+        """从问题中识别工作流 ID，注入该工作流的最近 10 次执行 + 7 天趋势。"""
+        import re
+        wf_ids = []
+        for pattern in [r'工作流\s*(\d+)', r'workflow\s*(\d+)', r'wf\s*(\d+)',
+                        r'工作流\s*id\s*[=:]\s*(\d+)', r'#(\d+)']:
+            matches = re.findall(pattern, question, re.IGNORECASE)
+            wf_ids.extend(int(m) for m in matches)
+        wf_ids = list(dict.fromkeys(wf_ids))[:5]
+
+        if not wf_ids:
+            return ""
+
+        parts = []
+        try:
+            from .agent_health_db import AgentHealthDB
+            db = AgentHealthDB()
+            for wf_id in wf_ids:
+                recent_logs = db.get_workflow_logs(workflow_id=wf_id, limit=10, hours=168)
+                if recent_logs:
+                    parts.append(f"\n=== 工作流 {wf_id} 最近 10 次执行 ===")
+                    for log in recent_logs:
+                        parts.append(
+                            f"- [{log['created_at'][:19]}] {log['status']} "
+                            f"step{log['failed_step']}/{log['total_steps']} "
+                            f"耗时{log.get('duration_seconds', 0):.1f}s "
+                            f"err={log.get('error_message', '')[:120]}"
+                        )
+
+                trend = db.get_workflow_trend(wf_id, hours=168)
+                if trend.get("daily"):
+                    parts.append(f"\n=== 工作流 {wf_id} 7 天趋势 ===")
+                    parts.append(
+                        f"总执行: {trend['summary']['total_executions']} 次, "
+                        f"成功率: {trend['summary']['success_rate']:.0%}, "
+                        f"平均耗时: {trend['summary']['avg_duration_seconds']}s"
+                    )
+                    for d in trend["daily"]:
+                        parts.append(
+                            f"  {d['date']}: {d['success']}/{d['total']} "
+                            f"({d['success_rate']:.0%}), avg {d['avg_duration']}s"
+                        )
+                    if trend.get("top_errors"):
+                        parts.append("Top 失败原因:")
+                        for err in trend["top_errors"]:
+                            parts.append(f"  - {err['error_message'][:100]} (×{err['count']})")
+        except Exception as e:
+            logger.warning(f"[AgentOps] 提取工作流上下文失败: {e}")
+
+        return "\n".join(parts) if parts else ""
 
     # ──────────────── 核心能力 4：定时快照 ────────────────
 
@@ -190,7 +251,7 @@ class AgentOpsEngine:
     def _save_snapshot(self, overview: Dict, tools: List[Dict]):
         from .agent_health_db import AgentHealthDB
         db = AgentHealthDB()
-        db.insert_snapshot(
+        snapshot_id = db.insert_snapshot(
             total_turns=overview["agent"]["total_turns"],
             total_tool_calls=overview["agent"]["total_tool_calls"],
             tool_error_rate=overview["agent"]["tool_error_rate"],
@@ -199,6 +260,18 @@ class AgentOpsEngine:
             open_circuits=overview["circuit"]["open_count"],
             tool_details=json.dumps(tools, ensure_ascii=False),
         )
+        # P7: 追加工作流/规划字段
+        if snapshot_id:
+            wf = overview.get("workflows", {})
+            plan = overview.get("planning", {})
+            db.update_snapshot_with_workflow(
+                snapshot_id=snapshot_id,
+                workflow_total=wf.get("total_executions_24h", 0),
+                workflow_failed=wf.get("failed_count", 0),
+                workflow_cancelled=wf.get("cancelled_count", 0),
+                plan_success_rate=plan.get("success_rate", 0),
+                plan_template_hit_rate=plan.get("template_hit_rate", 0),
+            )
 
     def _get_baseline(self, hours: int = 24) -> List[Dict]:
         from .agent_health_db import AgentHealthDB
@@ -308,6 +381,29 @@ class AgentOpsEngine:
                     "level": "warning", "tool": "*",
                     "message": f"活跃会话从基线 {recent_avg:.0f} 骤降至 {current}",
                     "suggestion": "检查前端服务是否正常，或是否有用户大规模掉线",
+                })
+
+        # P7: 工作流失败率检查
+        wf = overview.get("workflows", {})
+        if wf.get("total_executions_24h", 0) >= 5 and wf.get("success_rate", 1) < 0.8:
+            alerts.append({
+                "level": "warning", "tool": "workflow",
+                "message": (
+                    f"过去24h工作流成功率仅 {wf['success_rate']:.0%}"
+                    f"（{wf['failed_count']}/{wf['total_executions_24h']}）"
+                ),
+                "suggestion": "检查失败的工作流，确认是否因工具异常或参数错误导致",
+            })
+
+        # P7: 规划回退率检查
+        plan = overview.get("planning", {})
+        if plan.get("total_plans", 0) >= 20:
+            sr = plan.get("success_rate", 1)
+            if sr < 0.7:
+                alerts.append({
+                    "level": "warning", "tool": "phase_plan",
+                    "message": f"规划成功率仅 {sr:.0%}，LLM 可能异常",
+                    "suggestion": "检查 LLM API 连通性和模型响应格式",
                 })
 
         return alerts

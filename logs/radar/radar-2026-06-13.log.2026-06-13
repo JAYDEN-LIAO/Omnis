@@ -1,0 +1,146 @@
+2026-06-13 11:15:27 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:15:27 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:15:27 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=60.0h
+2026-06-13 11:25:27 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:25:59 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:25:59 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:25:59 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=60.0h
+2026-06-13 11:27:03 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:27:05 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:27:05 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:27:05 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=60.0h
+2026-06-13 11:27:10 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:27:12 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:27:12 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:27:12 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=60.0h
+2026-06-13 11:28:02 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:35:53 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:24 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:24 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:41:24 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:26 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:26 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:26 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:27 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:27 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:27 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:29 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:29 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:29 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:30 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:30 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:30 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:32 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:32 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:32 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:41:33 - INFO - [radar.main:124] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 11:41:33 - INFO - [radar.scheduler:312] - [Scheduler] 任务已重新调度: start_time=08:00, frequency=30.0h
+2026-06-13 11:41:33 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:47:25 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:47:54 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:47:54 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:47:54 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 11:48:17 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 11:48:49 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 11:48:49 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 11:48:49 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 12:14:58 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 12:15:28 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 12:15:28 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 12:15:28 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:32:29 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:33:00 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:33:00 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:33:00 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:33:52 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:35:44 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:35:44 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:35:44 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:46:52 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:47:28 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:47:28 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:47:28 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:47:52 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:49:38 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:49:38 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:49:38 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:50:02 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:50:37 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:50:37 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:50:37 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 14:52:44 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 14:53:20 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 14:53:20 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 14:53:20 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 15:15:03 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 15:16:09 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 15:16:09 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 15:16:09 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 15:47:39 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 15:48:10 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 15:48:10 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 15:48:10 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 15:48:10 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 15:48:46 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 15:48:46 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 15:48:46 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 15:56:27 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 15:57:00 - INFO - [radar.scheduler:404] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-13 15:57:00 - INFO - [radar.scheduler:469] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-13 15:57:00 - INFO - [radar.scheduler:230] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h
+2026-06-13 16:04:29 - INFO - [radar.scheduler:249] - [Scheduler] 调度器已停止
+2026-06-13 17:22:25 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:22:54 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:23:16 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:23:35 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:23:54 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:24:34 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:25:07 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:33:54 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:40:18 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:40:58 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:44:48 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:45:17 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:53:43 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:54:13 - WARNING - [radar.api:1080] - [RSS] 无效 token: fake_token...
+2026-06-13 17:59:08 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-13 17:59:46 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-13 18:00:21 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-13 18:00:56 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-13 22:08:26 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-13 22:16:04 - INFO - [radar.main:351] - Starting radar job pipeline (target_keyword=None, owner_id=u_60753a963a3740ac)
+2026-06-13 22:16:04 - INFO - [radar.main:120] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 22:16:04 - INFO - [radar.main:123] - Starting crawler for platform: WB
+2026-06-13 22:16:04 - INFO - [radar.main:134] - Executing task with keywords: 比亚迪,南京理工大学
+2026-06-13 22:16:04 - ERROR - [radar.main:137] - 【致命错误】找不到爬虫目录: D:\JAYDEN\develop\work\MediaRadar\backend\services\services\crawler_service
+2026-06-13 22:16:04 - INFO - [radar.main:243] - [Pipeline Mode] Analyzing WB...
+2026-06-13 22:16:04 - INFO - [radar.pipeline:223] - [Screener] 没有帖子匹配任何关键词，全量过滤
+2026-06-13 22:16:04 - INFO - [radar.pipeline:697] - [Pipeline] Screener 阶段无相关帖子，全量过滤
+2026-06-13 22:16:04 - INFO - [radar.main:302] - [Pipeline Mode] WB 完成，新增 0 条
+2026-06-13 22:24:13 - INFO - [radar.main:351] - Starting radar job pipeline (target_keyword=None, owner_id=u_60753a963a3740ac)
+2026-06-13 22:24:13 - INFO - [radar.main:120] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 22:24:13 - INFO - [radar.main:123] - Starting crawler for platform: WB
+2026-06-13 22:24:13 - INFO - [radar.main:134] - Executing task with keywords: 比亚迪,南京理工大学
+2026-06-13 22:24:13 - ERROR - [radar.main:137] - 【致命错误】找不到爬虫目录: D:\JAYDEN\develop\work\MediaRadar\backend\services\services\crawler_service
+2026-06-13 22:24:13 - INFO - [radar.main:243] - [Pipeline Mode] Analyzing WB...
+2026-06-13 22:24:13 - INFO - [radar.pipeline:223] - [Screener] 没有帖子匹配任何关键词，全量过滤
+2026-06-13 22:24:13 - INFO - [radar.pipeline:697] - [Pipeline] Screener 阶段无相关帖子，全量过滤
+2026-06-13 22:24:13 - INFO - [radar.main:302] - [Pipeline Mode] WB 完成，新增 0 条
+2026-06-13 22:57:00 - INFO - [radar.main:351] - Starting radar job pipeline (target_keyword=None, owner_id=u_60753a963a3740ac)
+2026-06-13 22:57:00 - INFO - [radar.main:120] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 22:57:00 - INFO - [radar.main:123] - Starting crawler for platform: WB
+2026-06-13 22:57:00 - INFO - [radar.main:134] - Executing task with keywords: 比亚迪,南京理工大学
+2026-06-13 22:57:00 - ERROR - [radar.main:137] - 【致命错误】找不到爬虫目录: D:\JAYDEN\develop\work\MediaRadar\backend\services\services\crawler_service
+2026-06-13 22:57:00 - INFO - [radar.main:243] - [Pipeline Mode] Analyzing WB...
+2026-06-13 22:57:00 - INFO - [radar.pipeline:223] - [Screener] 没有帖子匹配任何关键词，全量过滤
+2026-06-13 22:57:00 - INFO - [radar.pipeline:697] - [Pipeline] Screener 阶段无相关帖子，全量过滤
+2026-06-13 22:57:00 - INFO - [radar.main:302] - [Pipeline Mode] WB 完成，新增 0 条
+2026-06-13 23:08:33 - INFO - [radar.main:351] - Starting radar job pipeline (target_keyword=None, owner_id=u_60753a963a3740ac)
+2026-06-13 23:08:33 - INFO - [radar.main:120] - Loaded config: keywords=['比亚迪', '南京理工大学'], levels={'比亚迪': 'balanced', '南京理工大学': 'balanced'}
+2026-06-13 23:08:33 - INFO - [radar.main:123] - Starting crawler for platform: WB
+2026-06-13 23:08:33 - INFO - [radar.main:134] - Executing task with keywords: 比亚迪,南京理工大学
+2026-06-13 23:08:33 - ERROR - [radar.main:137] - 【致命错误】找不到爬虫目录: D:\JAYDEN\develop\work\MediaRadar\backend\services\services\crawler_service
+2026-06-13 23:08:33 - INFO - [radar.main:243] - [Pipeline Mode] Analyzing WB...
+2026-06-13 23:08:33 - INFO - [radar.pipeline:223] - [Screener] 没有帖子匹配任何关键词，全量过滤
+2026-06-13 23:08:33 - INFO - [radar.pipeline:697] - [Pipeline] Screener 阶段无相关帖子，全量过滤
+2026-06-13 23:08:33 - INFO - [radar.main:302] - [Pipeline Mode] WB 完成，新增 0 条

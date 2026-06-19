@@ -23,22 +23,25 @@ logger = get_logger("agent.tools.briefing")
     description="查询每日信息简报（按关键词/领域/日期筛选）",
     group="query",
     parameters={
-        "keyword": {
-            "type": "string",
-            "description": "关键词（可选）",
-        },
-        "domain": {
-            "type": "string",
-            "description": "领域（可选，如：新能源汽车/AI大模型）",
-        },
-        "date": {
-            "type": "string",
-            "description": "日期（可选，格式：YYYY-MM-DD）",
-        },
-        "limit": {
-            "type": "integer",
-            "description": "返回条数上限",
-            "default": 20,
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "关键词（可选）",
+            },
+            "domain": {
+                "type": "string",
+                "description": "领域（可选，如：新能源汽车/AI大模型）",
+            },
+            "date": {
+                "type": "string",
+                "description": "日期（可选，格式：YYYY-MM-DD）",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "返回条数上限",
+                "default": 20,
+            },
         },
     },
 )

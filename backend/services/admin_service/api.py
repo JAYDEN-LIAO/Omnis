@@ -69,10 +69,99 @@ class ChatQueryRequest(BaseModel):
 
 @router.post("/chat")
 async def agent_ops_chat(request: ChatQueryRequest, _=Depends(require_admin)):
-    """自然语言查询 Agent 系统状态"""
+    """自然语言查询 Agent 系统状态（P7 增强版：注入工作流上下文）"""
     from .agent_ops import get_agent_ops
-    answer = await get_agent_ops().chat_query(request.question)
+    answer = await get_agent_ops().chat_query_enhanced(request.question)
     return {"code": 200, "data": {"question": request.question, "answer": answer}}
+
+
+# ── P7: 工作流 + 规划监控端点 ──
+
+
+@router.get("/workflows")
+async def admin_workflow_stats(
+    owner_id: str = Query("", description="按用户过滤（空=全部）"),
+    workflow_id: int = Query(0, description="按工作流过滤（0=全部）"),
+    hours: int = Query(24, ge=1, le=720),
+    limit: int = Query(50, ge=1, le=500),
+    _=Depends(require_admin),
+):
+    """工作流执行统计 + 最近日志"""
+    from .agent_monitor import get_agent_monitor
+    monitor = get_agent_monitor()
+    stats = monitor.get_workflow_stats(hours=hours)
+    logs = monitor.health_db.get_workflow_logs(
+        owner_id=owner_id, workflow_id=workflow_id,
+        hours=hours, limit=limit,
+    )
+    return {
+        "code": 200,
+        "data": {
+            "stats": stats,
+            "logs": logs,
+            "filter": {
+                "owner_id": owner_id,
+                "workflow_id": workflow_id,
+                "hours": hours,
+            },
+        },
+    }
+
+
+@router.get("/workflows/{workflow_id}")
+async def admin_workflow_history(
+    workflow_id: int,
+    hours: int = Query(168, ge=1, le=720),
+    limit: int = Query(100, ge=1, le=1000),
+    _=Depends(require_admin),
+):
+    """单个工作流执行历史"""
+    from .agent_monitor import get_agent_monitor
+    monitor = get_agent_monitor()
+    logs = monitor.health_db.get_workflow_logs(
+        workflow_id=workflow_id, hours=hours, limit=limit,
+    )
+    return {"code": 200, "data": {"workflow_id": workflow_id, "logs": logs}}
+
+
+@router.get("/workflows/{workflow_id}/trend")
+async def admin_workflow_trend(
+    workflow_id: int,
+    hours: int = Query(168, ge=1, le=720),
+    _=Depends(require_admin),
+):
+    """★ 弱点3：单工作流的执行趋势（每日成功率 + Top 失败原因）"""
+    from .agent_monitor import get_agent_monitor
+    monitor = get_agent_monitor()
+    trend = monitor.health_db.get_workflow_trend(workflow_id=workflow_id, hours=hours)
+    return {"code": 200, "data": trend}
+
+
+@router.get("/planning")
+async def admin_planning_stats(_=Depends(require_admin)):
+    """规划阶段统计"""
+    from .agent_monitor import get_agent_monitor
+    monitor = get_agent_monitor()
+    return {"code": 200, "data": monitor.get_planning_stats()}
+
+
+@router.post("/workflows/{workflow_id}/cancel")
+async def admin_cancel_workflow(
+    workflow_id: int,
+    _=Depends(require_admin),
+):
+    """Admin 取消任意用户的工作流（无需 owner 校验）"""
+    from backend.services.radar_service.scheduler import (
+        _WF_CANCEL_EVENTS, _WF_CANCEL_LOCK,
+    )
+    with _WF_CANCEL_LOCK:
+        event = _WF_CANCEL_EVENTS.get(workflow_id)
+        if event:
+            event.set()
+            return {"code": 200, "data": {"cancelled": True}}
+    return {"code": 404, "data": {
+        "cancelled": False, "message": "工作流未在运行"
+    }}
 
 
 # ── WebSocket（token 认证 + 加入广播集合）──

@@ -5,7 +5,8 @@ from typing import Dict, List, Any, Optional
 
 from backend.core.logger import get_logger
 from backend.core.metrics import (
-    AGENT_TOOL_CALLS, AGENT_MEMORY_WRITES, AGENT_TURNS, CIRCUIT_BREAKER_STATE
+    AGENT_TOOL_CALLS, AGENT_MEMORY_WRITES, AGENT_TURNS, CIRCUIT_BREAKER_STATE,
+    AGENT_PLAN_GENERATION_TOTAL,
 )
 from .agent_health_db import AgentHealthDB
 
@@ -22,6 +23,8 @@ class AgentMonitorService:
         mem_success, mem_error = mem.get("success", 0), mem.get("error", 0)
         circuit = self._get_circuit_summary()
         mem_store = self._get_memory_store_stats()
+        wf_stats = self.health_db.get_workflow_stats(hours=24)
+        plan_stats = self.get_planning_stats()
 
         return {
             "agent": {
@@ -39,6 +42,23 @@ class AgentMonitorService:
             "circuit": {
                 "open_count": circuit["open_count"],
                 "breakers": circuit["details"],
+            },
+            "workflows": {
+                "total_executions_24h": wf_stats["total_executions"],
+                "success_count": wf_stats["success_count"],
+                "failed_count": wf_stats["failed_count"],
+                "cancelled_count": wf_stats["cancelled_count"],
+                "success_rate": round(wf_stats["success_rate"], 3),
+                "avg_duration_seconds": wf_stats["avg_duration_seconds"],
+            },
+            "planning": {
+                "total_plans": plan_stats["total_plans"],
+                "success_count": plan_stats["success_count"],
+                "fallback_count": plan_stats["fallback_count"],
+                "template_hit_count": plan_stats["template_hit_count"],
+                "parse_error_count": plan_stats["parse_error_count"],
+                "success_rate": round(plan_stats["success_rate"], 3),
+                "template_hit_rate": round(plan_stats["template_hit_rate"], 3),
             },
         }
 
@@ -79,6 +99,27 @@ class AgentMonitorService:
 
     def get_diagnosis_events(self, limit: int = 50) -> List[Dict]:
         return self.health_db.get_recent_diagnosis(limit=limit)
+
+    def get_workflow_stats(self, owner_id: str = "", hours: int = 24) -> Dict:
+        return self.health_db.get_workflow_stats(hours=hours)
+
+    def get_planning_stats(self) -> Dict:
+        """规划阶段统计（直接从 Prometheus 读）"""
+        samples = self._get_counter_sum_by_label(AGENT_PLAN_GENERATION_TOTAL, "status")
+        success = samples.get("success", 0)
+        fallback = samples.get("fallback", 0)
+        template_hit = samples.get("template_hit", 0)
+        parse_error = samples.get("parse_error", 0)
+        total = success + fallback + template_hit + parse_error
+        return {
+            "total_plans": total,
+            "success_count": success,
+            "fallback_count": fallback,
+            "template_hit_count": template_hit,
+            "parse_error_count": parse_error,
+            "success_rate": success / max(total, 1),
+            "template_hit_rate": template_hit / max(total, 1),
+        }
 
     def record_diagnosis(self, owner_id: str, tool_name: str,
                          error_type: str, recovery: str, success: bool):

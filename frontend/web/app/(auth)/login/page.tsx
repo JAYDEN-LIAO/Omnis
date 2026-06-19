@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, Suspense, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import { persistAuth } from '@/lib/auth-client';
 import { toast } from 'sonner';
+import pkg from '@/package.json';
 
 function LoginForm() {
   const router = useRouter();
@@ -16,33 +18,11 @@ function LoginForm() {
   const [nickname, setNickname] = useState('');
   const [pending, setPending] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const omnisRef = useRef<HTMLHeadingElement>(null);
-  const [hubPos, setHubPos] = useState({ x: 185, y: 260 });
-
-  const updateHubPosition = useCallback(() => {
-    if (!omnisRef.current) return;
-    const el = omnisRef.current;
-    const section = el.closest('section');
-    if (!section) return;
-    const er = el.getBoundingClientRect();
-    const sr = section.getBoundingClientRect();
-    const vbW = 1000, vbH = 800;
-    const scaleX = sr.width / vbW;
-    const scaleY = sr.height / vbH;
-    const scale = Math.max(scaleX, scaleY);
-    const ox = (sr.width - vbW * scale) / 2;
-    const oy = (sr.height - vbH * scale) / 2;
-    setHubPos({
-      x: (er.left + er.width / 2 - sr.left - ox) / scale,
-      y: (er.top + er.height / 2 - sr.top - oy) / scale,
-    });
-  }, []);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    updateHubPosition();
-    window.addEventListener('resize', updateHubPosition);
-    return () => window.removeEventListener('resize', updateHubPosition);
-  }, [updateHubPosition]);
+    requestAnimationFrame(() => setReady(true));
+  }, []);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,146 +70,200 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen w-full relative overflow-hidden">
-      <div className="interlaced-grid" />
-
-      {/* Left 70% — Brand narrative */}
+    <div className={`light flex min-h-screen w-full relative overflow-hidden ${ready ? 'reveal-ready' : ''}`}>
+      {/* Left 70% — Brand narrative (from login.html design) */}
       <section
-        className="hidden lg:flex split-70 relative items-start justify-start pt-24 px-16 pb-16 overflow-hidden"
+        className="hidden lg:flex relative items-center justify-center pt-4 pl-12 pr-16 pb-16 overflow-hidden"
         style={{
           width: '70%',
-          background: 'radial-gradient(ellipse 80% 60% at 30% 50%, var(--bg-inner) 0%, var(--bg-outer) 100%)',
+          background: 'var(--background)',
+          borderRight: '0.5px solid oklch(0 0 0 / 0.06)',
         }}
       >
         {/* Ambient background */}
         <div className="absolute inset-0 z-0">
-          <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] rounded-full" style={{ background: 'oklch(0.78 0.16 85 / 0.12)', filter: 'blur(120px)' }} />
-          <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] rounded-full" style={{ background: 'oklch(0.95 0.03 155 / 0.3)', filter: 'blur(100px)' }} />
+          <div
+            className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] rounded-full"
+            style={{ background: 'oklch(0.78 0.16 85 / 0.10)', filter: 'blur(120px)' }}
+          />
+          <div
+            className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] rounded-full"
+            style={{ background: 'oklch(0.95 0.03 155 / 0.3)', filter: 'blur(100px)' }}
+          />
         </div>
 
-        {/* Platform network graph — hub near Omnis, nodes radiating outward */}
-        <div className="absolute inset-0 z-[1] pointer-events-none overflow-hidden">
-          <svg
-            className="w-full h-full"
-            viewBox="0 0 1000 800"
-            preserveAspectRatio="xMidYMid slice"
-          >
-            <g className="network-float" style={{ transformOrigin: `${hubPos.x} ${hubPos.y}` }}>
-              {/* Edges — hub mesh (dynamically aligned to Omnis text) */}
-              <g className="network-edges" fill="none" stroke="oklch(0.78 0.16 85 / 0.12)" strokeWidth="1.1">
-                <line x1={hubPos.x} y1={hubPos.y} x2="45" y2="80" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="750" y2="110" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="30" y2="390" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="880" y2="280" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="50" y2="650" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="450" y2="730" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="780" y2="600" />
-                {/* Inter-node connections */}
-                <line x1="45" y1="80" x2="30" y2="390" />
-                <line x1="750" y1="110" x2="880" y2="280" />
-                <line x1="30" y1="390" x2="50" y2="650" />
-                <line x1="880" y1="280" x2="780" y2="600" />
-                <line x1="50" y1="650" x2="450" y2="730" />
-                <line x1="450" y1="730" x2="780" y2="600" />
-                <line x1="45" y1="80" x2="750" y2="110" />
-                <line x1="30" y1="390" x2="880" y2="280" />
-                <line x1="50" y1="650" x2="780" y2="600" />
-              </g>
 
-              {/* Edges animated dash flow */}
-              <g className="network-edges-flow" fill="none" stroke="oklch(0.78 0.16 85 / 0.06)" strokeWidth="1.3" strokeDasharray="5 14">
-                <line x1={hubPos.x} y1={hubPos.y} x2="45" y2="80" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="750" y2="110" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="30" y2="390" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="880" y2="280" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="50" y2="650" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="450" y2="730" className="edge-flow" />
-                <line x1={hubPos.x} y1={hubPos.y} x2="780" y2="600" className="edge-flow" />
-              </g>
 
-              {/* Nodes */}
-              {/* 微博 */}
-              <g className="network-node">
-                <circle cx="45" cy="80" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse" />
-                <circle cx="45" cy="80" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="56" y="84" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">微博</text>
-              </g>
 
-              {/* 小红书 */}
-              <g className="network-node">
-                <circle cx="750" cy="110" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-1" />
-                <circle cx="750" cy="110" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="762" y="114" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">小红书</text>
-              </g>
-
-              {/* B站 */}
-              <g className="network-node">
-                <circle cx="30" cy="390" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-2" />
-                <circle cx="30" cy="390" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="42" y="394" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">B站</text>
-              </g>
-
-              {/* 抖音 */}
-              <g className="network-node">
-                <circle cx="880" cy="280" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-3" />
-                <circle cx="880" cy="280" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="892" y="284" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">抖音</text>
-              </g>
-
-              {/* 知乎 */}
-              <g className="network-node">
-                <circle cx="50" cy="650" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-4" />
-                <circle cx="50" cy="650" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="62" y="654" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">知乎</text>
-              </g>
-
-              {/* 快手 */}
-              <g className="network-node">
-                <circle cx="450" cy="730" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-5" />
-                <circle cx="450" cy="730" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="462" y="734" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">快手</text>
-              </g>
-
-              {/* 贴吧 */}
-              <g className="network-node">
-                <circle cx="780" cy="600" r="5" fill="oklch(0.78 0.16 85 / 0.55)" className="node-pulse node-delay-6" />
-                <circle cx="780" cy="600" r="2.5" fill="oklch(0.78 0.16 85 / 0.85)" />
-                <text x="792" y="604" fill="oklch(0.78 0.16 85 / 0.4)" fontSize="10" fontFamily="system-ui, sans-serif" letterSpacing="1">贴吧</text>
-              </g>
-
-              {/* Central hub — aligned to Omnis text */}
-              <circle cx={hubPos.x} cy={hubPos.y} r="7" fill="oklch(0.78 0.16 85 / 0.3)" className="node-pulse" />
-              <circle cx={hubPos.x} cy={hubPos.y} r="3" fill="oklch(0.78 0.16 85 / 0.75)" />
-            </g>
-
-          </svg>
+        {/* Message waterfall */}
+        <div className="msg-waterfall">
+          <div className="msg-item" style={{ left: '11.6%', animationDelay: '-1.8s', animationDuration: '32.3s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>华为 Mate 80 折叠屏跑分曝光，性能提升 40%</span>
+          </div>
+          <div className="msg-item" style={{ left: '23.5%', animationDelay: '-1.5s', animationDuration: '28.8s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>青岛三天两夜旅游攻略，人均 800 玩到爽</span>
+          </div>
+          <div className="msg-item" style={{ left: '37.7%', animationDelay: '-0.8s', animationDuration: '33.9s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>今天在银行排队一小时，VIP 插队太离谱了</span>
+          </div>
+          <div className="msg-item" style={{ left: '45.0%', animationDelay: '-0.2s', animationDuration: '24.3s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>朝阳区新开的日式烧肉店，和牛入口即化</span>
+          </div>
+          <div className="msg-item" style={{ left: '55.3%', animationDelay: '0.7s', animationDuration: '37.4s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>小米 SU7 实测续航达成率 92%，超出预期</span>
+          </div>
+          <div className="msg-item" style={{ left: '7.4%', animationDelay: '2.0s', animationDuration: '24.3s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>吐槽一下：某互联网大厂又开始变相裁员了</span>
+          </div>
+          <div className="msg-item" style={{ left: '22.3%', animationDelay: '3.4s', animationDuration: '36.3s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>故宫雪景美哭了，这才是北平的冬天</span>
+          </div>
+          <div className="msg-item" style={{ left: '31.2%', animationDelay: '4.1s', animationDuration: '32.6s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>邻居家的猫会开门，我家猫只会拆家</span>
+          </div>
+          <div className="msg-item" style={{ left: '50.3%', animationDelay: '5.4s', animationDuration: '28.2s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>三亚海鲜市场避雷指南，本地人教你挑</span>
+          </div>
+          <div className="msg-item" style={{ left: '55.9%', animationDelay: '6.2s', animationDuration: '31.6s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>苹果 Vision Pro 销量惨淡，库克急了</span>
+          </div>
+          <div className="msg-item" style={{ left: '7.0%', animationDelay: '6.6s', animationDuration: '34.1s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>周末去了一趟莫干山，民宿绝了</span>
+          </div>
+          <div className="msg-item" style={{ left: '27.4%', animationDelay: '7.8s', animationDuration: '36.6s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>某品牌奶茶被曝使用过期原料，网友炸了</span>
+          </div>
+          <div className="msg-item" style={{ left: '32.9%', animationDelay: '8.1s', animationDuration: '33.8s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>DeepSeek V4 发布，编程能力碾压 GPT</span>
+          </div>
+          <div className="msg-item" style={{ left: '48.5%', animationDelay: '9.7s', animationDuration: '26.9s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>成都苍蝇馆子地图，不好吃你来打我</span>
+          </div>
+          <div className="msg-item" style={{ left: '57.9%', animationDelay: '10.7s', animationDuration: '34.8s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>特斯拉 FSD 入华，国产智驾还扛得住吗</span>
+          </div>
+          <div className="msg-item" style={{ left: '16.4%', animationDelay: '11.7s', animationDuration: '28.5s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>今天坐高铁遇到个话痨师傅，一路没停</span>
+          </div>
+          <div className="msg-item" style={{ left: '28.6%', animationDelay: '12.0s', animationDuration: '30.1s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>大理洱海骑行攻略，风景比照片美十倍</span>
+          </div>
+          <div className="msg-item" style={{ left: '38.2%', animationDelay: '13.2s', animationDuration: '30.8s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>老板画饼新高度：我们要做 AI 界的 Swisse</span>
+          </div>
+          <div className="msg-item" style={{ left: '50.4%', animationDelay: '13.6s', animationDuration: '25.5s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>Switch 2 确认向下兼容，老玩家落泪</span>
+          </div>
+          <div className="msg-item" style={{ left: '61.1%', animationDelay: '14.3s', animationDuration: '28.2s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>长沙夜市从头吃到尾，只花了 100 块</span>
+          </div>
+          <div className="msg-item" style={{ left: '9.3%', animationDelay: '16.2s', animationDuration: '32.9s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>OpenAI 新模型被指套壳，AI 圈又吵起来了</span>
+          </div>
+          <div className="msg-item" style={{ left: '23.5%', animationDelay: '16.9s', animationDuration: '35.5s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>北海涠洲岛避坑：别被黄牛宰了</span>
+          </div>
+          <div className="msg-item" style={{ left: '31.1%', animationDelay: '18.0s', animationDuration: '35.7s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '12px' }}>发现一家宝藏咖啡馆，老板是前阿里 P8</span>
+          </div>
+          <div className="msg-item" style={{ left: '48.3%', animationDelay: '18.5s', animationDuration: '29.5s' }}>
+            <span className="msg-dot"></span>
+            <span className="msg-text" style={{ fontSize: '11px' }}>B站 UP 主停更潮背后：用爱发电撑不住了</span>
+          </div>
         </div>
-
-        <div className="relative z-10 w-full max-w-4xl flex flex-col items-start gap-10 ml-10 pt-10">
-          {/* Brand identity */}
-          <div className="fade-in-up mt-24">
-            <h1 ref={omnisRef} className="serif-headline text-7xl font-bold tracking-tight" style={{ color: 'var(--on-surface)' }}>
-              Omnis
-            </h1>
-            <div className="mt-4 w-20 h-[2px]" style={{ background: 'var(--primary-gold)' }} />
+                {/* Content Container */}
+        <div className="relative z-10 w-full max-w-4xl flex flex-col items-start gap-8">
+          {/* Brand logo + divider */}
+          <div className="flex flex-col gap-2 phase-logo">
+            <div className="logo-shimmer logo-reveal-wrap">
+              <Image
+                src="/logo.svg"
+              alt="Omnis"
+              width={500}
+              height={80}
+              priority
+              unoptimized
+              style={{ marginLeft: '-10px' }}
+            />
+              </div>
           </div>
 
-          {/* Hero text */}
-          <div className="space-y-6 fade-in-up fade-in-up-1 mt-16">
-            <h2 className="serif-headline text-5xl leading-tight" style={{ color: 'var(--on-surface)' }}>
-              Where AI<br />
-              <span className="italic font-semibold" style={{ color: 'var(--primary-gold)' }}>Meets Media Intelligence.</span>
+            {/* 5 core capability keywords */}
+            <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-1 mb-8 phase-keywords">
+              <span className="keyword-item flex items-center gap-1.5">
+                <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--primary-gold)' }}></span>
+                <span className="font-medium text-sm font-cn" style={{ color: 'var(--on-surface)' }}>舆情监控</span>
+              </span>
+              <span className="keyword-item flex items-center gap-1.5">
+                <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--primary-gold)' }}></span>
+                <span className="font-medium text-sm font-cn" style={{ color: 'var(--on-surface)' }}>攻略规划</span>
+              </span>
+              <span className="keyword-item flex items-center gap-1.5">
+                <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--primary-gold)' }}></span>
+                <span className="font-medium text-sm" style={{ color: 'var(--on-surface)' }}>实体追踪</span>
+              </span>
+              <span className="keyword-item flex items-center gap-1.5">
+                <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--primary-gold)' }}></span>
+                <span className="font-medium text-sm" style={{ color: 'var(--on-surface)' }}>跨平台对比</span>
+              </span>
+              <span className="keyword-item flex items-center gap-1.5">
+                <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--primary-gold)' }}></span>
+                <span className="font-medium text-sm" style={{ color: 'var(--on-surface)' }}>工作流自动化</span>
+              </span>
+            </div>
+
+          {/* Tagline + description + globe network */}
+          <div className="relative space-y-2 mb-2 w-full phase-text">
+            <h2
+              className="serif-headline text-2xl leading-tight"
+              style={{ color: 'var(--on-surface)' }}
+            >
+              where Agents meet{' '}
+              <span className="italic font-semibold" style={{ color: 'var(--primary-gold)' }}>
+                Media Intelligence
+              </span>
             </h2>
-            <p className="text-xl text-[var(--on-surface-variant)] max-w-xl leading-relaxed fade-in-up fade-in-up-2">
-              主流媒体智能情报中枢，聚合全域信息流，集智能搜集、过滤审查、实时监测与深度分析于一体，洞察先机
+            <p
+              className="text-sm italic font-cn"
+              style={{
+                color: 'oklch(0.35 0.01 280 / 0.55)',
+                borderBottom: '1px solid oklch(0.78 0.16 85 / 0.5)',
+                paddingBottom: '6px',
+                display: 'inline-block',
+              }}
+            >
+              跨平台媒体信息数据采集与分析智能体
             </p>
           </div>
         </div>
       </section>
 
-      {/* Right 30% — Login form */}
+      {/* Right 30% — Login form (mostly unchanged) */}
       <main
-        className="bg-white flex flex-col justify-start px-12 lg:px-16 pt-10 relative z-10 overflow-hidden"
+        className="bg-white flex flex-col justify-start px-12 lg:px-16 pt-20 relative z-10 overflow-hidden"
         style={{ width: '30%' }}
       >
         {/* Mobile brand display */}
@@ -237,25 +271,25 @@ function LoginForm() {
           <span className="serif-headline text-3xl font-bold" style={{ color: 'var(--on-surface)' }}>Omnis</span>
         </div>
 
-        <div className="w-full max-w-sm mx-auto animate-fade-up">
+        <div className="w-full max-w-sm mx-auto animate-fade-up phase-right">
           <div className="mb-5">
             <h3 className="serif-headline text-3xl mb-3" style={{ color: 'var(--on-surface)' }}>
               {mode === 'login' ? '欢迎回来' : '创建账号'}
             </h3>
-            <p className="text-[var(--on-surface-variant)]">
-              {mode === 'login' ? '访问您的分析控制台。' : '加入智能情报网络。'}
+            <p style={{ color: 'var(--on-surface-variant)' }}>
+              {mode === 'login' ? '访问您的分析控制台' : '加入智能情报网络'}
             </p>
           </div>
 
-          {/* Mode toggle (preserved from existing logic) */}
+          {/* Mode toggle */}
           <div className="flex items-center gap-2 mb-6 p-1 rounded-lg" style={{ background: 'oklch(0 0 0 / 0.03)' }}>
             <button
               type="button"
               onClick={() => setMode('login')}
               className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                mode === 'login' ? 'bg-white shadow-sm' : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                mode === 'login' ? 'bg-white shadow-sm' : 'hover:text-[var(--on-surface)]'
               }`}
-              style={mode === 'login' ? { color: 'var(--on-surface)' } : undefined}
+              style={mode === 'login' ? { color: 'var(--on-surface)' } : { color: 'var(--on-surface-variant)' }}
             >
               登录
             </button>
@@ -263,9 +297,9 @@ function LoginForm() {
               type="button"
               onClick={() => setMode('register')}
               className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                mode === 'register' ? 'bg-white shadow-sm' : 'text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]'
+                mode === 'register' ? 'bg-white shadow-sm' : 'hover:text-[var(--on-surface)]'
               }`}
-              style={mode === 'register' ? { color: 'var(--on-surface)' } : undefined}
+              style={mode === 'register' ? { color: 'var(--on-surface)' } : { color: 'var(--on-surface-variant)' }}
             >
               注册
             </button>
@@ -369,10 +403,11 @@ function LoginForm() {
             </div>
             )}
 
+            {/* Brushed-gold submit button — matching login.html style */}
             <button
               type="submit"
               disabled={pending !== null}
-              className="w-full brushed-gold hover:opacity-95 text-lg py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-3 brushed-gold-text font-bold serif-headline mb-2"
+              className="brushed-gold hover:opacity-95 w-full text-lg py-2 rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-3 brushed-gold-text font-bold serif-headline mb-2"
               style={{ opacity: pending !== null ? 0.7 : 1 }}
             >
               <span>{pending === 'email' ? '处理中...' : (mode === 'login' ? '登录' : '注册')}</span>
@@ -383,9 +418,11 @@ function LoginForm() {
           {/* Social connect */}
           <div className="mt-8">
             <div className="relative mb-5">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[var(--border-faint)]" /></div>
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t" style={{ borderColor: 'var(--border-faint)' }} /></div>
               <div className="relative flex justify-center">
-                <span className="bg-white px-4 text-[10px] label-caps text-[var(--on-surface-variant)]">或者通过以下方式登录</span>
+                <span className="bg-white px-4 text-[10px] label-caps" style={{ color: 'var(--on-surface-variant)' }}>
+                  或者通过以下方式登录
+                </span>
               </div>
             </div>
             <button
@@ -404,7 +441,7 @@ function LoginForm() {
             </button>
           </div>
 
-          <p className="mt-4 text-center text-sm text-[var(--on-surface-variant)]">
+          <p className="mt-4 text-center text-sm" style={{ color: 'var(--on-surface-variant)' }}>
             还没有账号？
             <button type="button" onClick={() => setMode('register')} className="font-bold hover:underline ml-1" style={{ color: 'var(--primary-gold)' }}>
               注册
@@ -424,94 +461,170 @@ function LoginForm() {
 
         {/* Footer */}
         <div className="absolute bottom-12 left-0 right-0 px-16 flex justify-between items-center opacity-30 pointer-events-none">
-          <span className="label-caps text-[10px]">v2.4.0-A</span>
+          <span className="label-caps text-[10px]">{`v${pkg.version}`}</span>
           <span className="label-caps text-[10px]">&copy; 2026 Omnis 系统</span>
         </div>
       </main>
 
-      {/* Responsive: hide left panel on small screens */}
+      {/* Styles */}
       <style>{`
-        @media (max-width: 1024px) {
+        @import url('https://fonts.googleapis.com/css2?family=LXGW+WenKai:wght@400;700&display=swap');
+        /* Force light mode for the entire page */
+        .light {
+          --background: oklch(0.97 0.005 280);
+          --on-surface: #1a1a18;
+          --on-surface-variant: #4a4a48;
+          --primary-gold: oklch(0.78 0.16 85);
+        }
+        .light,
+        .light * {
+          color-scheme: light;
+        }
+
+        /* ── Feature cards: staggered float ── */
+
+
+
+
+
+        @keyframes cardFloat {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+
+
+
+
+
+
+
+
+
+        /* ── Entrance system ── */
+
+        /* Hidden elements (activated by .reveal-ready) */
+        .phase-right,
+        .phase-logo,
+        .phase-text {
+          opacity: 0;
+        }
+
+        /* Right side: appears first */
+        .reveal-ready .phase-right {
+          animation: fadeSlideRight 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+        }
+        @keyframes fadeSlideRight {
+          0% { opacity: 0; transform: translateY(12px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        /* OMNIS logo: starts immediately, slow 2.5s left-to-right reveal */
+        .reveal-ready .phase-logo {
+          opacity: 1;
+        }
+        .logo-reveal-wrap {
+          display: inline-block;
+          clip-path: inset(0 100% 0 0);
+        }
+        .reveal-ready .logo-reveal-wrap {
+          animation: logoReveal 2.5s cubic-bezier(0.25, 0.1, 0.25, 1) 0s both;
+        }
+        @keyframes logoReveal {
+          0% { clip-path: inset(0 100% 0 0); filter: brightness(0.6); }
+          40% { filter: brightness(1.1); }
+          100% { clip-path: inset(0 0% 0 0); filter: brightness(1); }
+        }
+
+        /* 5 keywords: stagger during logo reveal */
+        .phase-keywords { opacity: 0; }
+        .reveal-ready .phase-keywords { opacity: 1; }
+        .reveal-ready .keyword-item {
+          opacity: 0;
+          animation: keywordPop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .reveal-ready .keyword-item:nth-child(1) { animation-delay: 0.3s; }
+        .reveal-ready .keyword-item:nth-child(2) { animation-delay: 0.6s; }
+        .reveal-ready .keyword-item:nth-child(3) { animation-delay: 0.9s; }
+        .reveal-ready .keyword-item:nth-child(4) { animation-delay: 1.2s; }
+        .reveal-ready .keyword-item:nth-child(5) { animation-delay: 1.5s; }
+        @keyframes keywordPop {
+          0% { opacity: 0; transform: translateY(6px) scale(0.95); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        /* Tagline + description: after logo reveal */
+        .reveal-ready .phase-text {
+          animation: fadeSlideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 2.5s both;
+        }
+        @keyframes fadeSlideUp {
+          0% { opacity: 0; transform: translateY(24px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- Logo subtle gold shimmer (loops after reveal) --- */
+        .logo-shimmer {
+          animation: goldShimmer 4s ease-in-out 2.2s infinite;
+        }
+        @keyframes goldShimmer {
+          0%, 100% { filter: brightness(1) saturate(1); }
+          50% { filter: brightness(1.06) saturate(1.05); }
+        }
+
+        /* --- Message waterfall --- */
+        .msg-waterfall {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 44%;
+          height: 100%;
+          pointer-events: none;
+          overflow: hidden;
+          z-index: 1;
+        }
+        .msg-item {
+          position: absolute;
+          display: inline-flex;
+          align-items: flex-start;
+          gap: 5px;
+          padding: 7px 11px;
+          border-radius: 10px;
+          background: rgba(255, 255, 255, 0.35);
+          backdrop-filter: blur(8px);
+          border: 0.5px solid oklch(0.78 0.16 85 / 0.08);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+          white-space: nowrap;
+          animation: msgRise ease-in-out infinite;
+          animation-fill-mode: both;
+        }
+        .msg-dot {
+          width: 5px;
+          height: 5px;
+          min-width: 5px;
+          border-radius: 50%;
+          margin-top: 4px;
+          background: oklch(0.78 0.16 85 / 0.3);
+        }
+        .msg-text {
+          color: oklch(0.15 0.01 280 / 0.45);
+          line-height: 1.4;
+          letter-spacing: 0.2px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 160px;
+        }
+        @keyframes msgRise {
+          0% { top: 105%; opacity: 0; }
+          2% { opacity: 0.5; }
+          6% { opacity: 0.8; }
+          72% { opacity: 0.55; }
+          90% { opacity: 0; transform: translateX(6px); }
+          100% { top: -15%; opacity: 0; transform: translateX(6px); }
+        }
+
+@media (max-width: 1024px) {
           .split-70 { display: none !important; }
           main { width: 100% !important; }
           body { overflow: auto; }
-        }
-
-        /* --- Animations --- */
-
-        /* Fade-in-up for text elements */
-        .fade-in-up {
-          opacity: 0;
-          transform: translateY(20px);
-          animation: fadeInUp 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-        }
-        .fade-in-up-1 { animation-delay: 0.15s; }
-        .fade-in-up-2 { animation-delay: 0.35s; }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        /* Node pulse animation */
-        .node-pulse {
-          transform-origin: center;
-          animation: nodePulse 3s ease-in-out infinite;
-        }
-        .node-delay-1 { animation-delay: 0.4s; }
-        .node-delay-2 { animation-delay: 0.8s; }
-        .node-delay-3 { animation-delay: 1.2s; }
-        .node-delay-4 { animation-delay: 1.6s; }
-        .node-delay-5 { animation-delay: 2.0s; }
-        .node-delay-6 { animation-delay: 2.4s; }
-
-        @keyframes nodePulse {
-          0%, 100% {
-            opacity: 0.35;
-            r: 5;
-          }
-          50% {
-            opacity: 0.9;
-            r: 8;
-          }
-        }
-
-        /* Edge flow animation — dash offset scroll */
-        .edge-flow {
-          stroke-dashoffset: 0;
-          animation: edgeFlow 4s linear infinite;
-        }
-
-        @keyframes edgeFlow {
-          to {
-            stroke-dashoffset: -18;
-          }
-        }
-
-        /* Drift float — entire network gently sways */
-        .network-float {
-          animation: netDrift 8s ease-in-out infinite;
-        }
-
-        @keyframes netDrift {
-          0%, 100% {
-            transform: translate(0, 0) rotate(0deg);
-          }
-          25% {
-            transform: translate(8px, -6px) rotate(0.6deg);
-          }
-          50% {
-            transform: translate(-4px, -10px) rotate(-0.4deg);
-          }
-          75% {
-            transform: translate(6px, -3px) rotate(0.7deg);
-          }
         }
       `}</style>
     </div>
@@ -520,7 +633,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-[var(--on-surface-variant)]">加载中&hellip;</div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm" style={{ color: 'var(--on-surface-variant)' }}>加载中&hellip;</div>}>
       <LoginForm />
     </Suspense>
   );

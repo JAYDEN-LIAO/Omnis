@@ -80,6 +80,27 @@ async def lifespan(app: FastAPI):
         app.state.scheduler_start_msg = f"启动异常: {e}"
         app.state.scheduler_healthy = False
 
+    # 用户工作流调度器（每分钟检查 cron 到期）
+    try:
+        from services.radar_service.scheduler import _run_user_workflows
+        from apscheduler.triggers.interval import IntervalTrigger
+        from services.radar_service.scheduler import _scheduler as _wf_sched
+        from apscheduler.schedulers.background import BackgroundScheduler
+        # 获取或创建调度器
+        _user_wf_scheduler = _wf_sched or BackgroundScheduler(timezone="Asia/Shanghai")
+        _user_wf_scheduler.add_job(
+            _run_user_workflows,
+            IntervalTrigger(minutes=1),
+            id="user_workflows",
+            name="用户自定义工作流",
+            misfire_grace_time=30,
+        )
+        if _wf_sched is None:
+            _user_wf_scheduler.start()
+        logger.info("[Gateway] 用户工作流调度器已注册 (每分钟检查)")
+    except Exception as e:
+        logger.error(f"[Gateway] 用户工作流调度器注册失败: {e}", exc_info=True)
+
     # Agent Ops 调度器（智能运维引擎）
     try:
         from backend.services.admin_service.agent_ops import get_agent_ops

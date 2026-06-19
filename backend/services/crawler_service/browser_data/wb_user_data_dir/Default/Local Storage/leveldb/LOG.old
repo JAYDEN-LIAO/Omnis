@@ -1,0 +1,6 @@
+2026/06/13-23:18:53.851 ed94 Reusing MANIFEST D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\Local Storage\leveldb/MANIFEST-000001
+2026/06/13-23:18:53.856 ed94 Recovering log #51
+2026/06/13-23:18:53.859 ed94 Reusing old log D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\Local Storage\leveldb/000051.log 
+2026/06/13-23:19:53.868 d430 Level-0 table #55: started
+2026/06/13-23:19:53.879 d430 Level-0 table #55: 94021 bytes OK
+2026/06/13-23:19:53.881 d430 Delete type=0 #51

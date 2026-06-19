@@ -1,0 +1,4 @@
+2026-06-14 11:09:03 - WARNING - [radar.api:948] - [RSS] 无效 token: fake_token...
+2026-06-14 19:54:17 - INFO - [radar.scheduler:411] - [Scheduler] 每日简报未启用，不注册任务
+2026-06-14 19:54:17 - INFO - [radar.scheduler:476] - [Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)
+2026-06-14 19:54:17 - INFO - [radar.scheduler:234] - [Scheduler] 调度器已启动: start_time=08:00, frequency=30.0h

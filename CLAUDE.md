@@ -63,7 +63,11 @@ backend/
 │   ├── agent_service/        # AI 助手对话（重点）
 │   │   ├── agent_core.py     # 流式对话引擎，Function Calling（26 工具）
 │   │   ├── sse.py            # SSE 事件工厂
+│   │   ├── workflows_db.py   # v2.0 统一工作流存储（preset + auto_template + user）
 │   │   ├── tools/            # 工具集（按组分文件）
+│   │   │   ├── atomic.py         # v2.0 H 组 12+ 原子工具
+│   │   │   ├── composite.py      # v2.0 I 组 组合工具动态注册
+│   │   │   ├── sentiment_dict.py # v2.0 领域情感词典
 │   │   │   ├── subscription.py  # A 组：订阅管理 + parse_intent
 │   │   │   ├── scan.py          # B 组：扫描/调度
 │   │   │   ├── query.py         # C 组：数据查询 + web_search
@@ -214,7 +218,7 @@ RadarPipeline (Pipeline 调度器)
 
 ## AI 助手（Agent Service）
 
-AI 助手通过 Function Calling 拥有 26 个工具，分 7 组：
+AI 助手通过 Function Calling 拥有 26 个工具，分 7 组，v2.0 新增 12+ 原子工具（H 组）+ 4 个组合工具（I 组）：
 - **A 组（订阅管理）**: list_subscriptions / add_subscription / update_subscription / remove_subscription / parse_intent
 - **B 组（扫描/调度）**: trigger_scan / pause_scan / resume_scan / get_schedule / set_schedule / get_crawl_status
 - **C 组（数据查询）**: search_alerts / get_topic_detail / web_search

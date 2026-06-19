@@ -24,6 +24,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from backend.core.logger import get_logger
 from backend.core.context import set_trace_id, generate_trace_id
+import os
 
 logger = get_logger("radar.scheduler")
 
@@ -35,6 +36,9 @@ _is_running: bool = False
 # v2.2: per-user 最后扫描时间，用于决定本轮是否需要为某用户跑扫描
 _user_last_scan_at: dict[str, datetime.datetime] = {}
 _user_last_scan_lock: threading.Lock = threading.Lock()
+
+# P6: 管线退化适配 — 旧路径(legacy) / 新路径(composite tools)
+USE_COMPOSITE_TOOLS = os.getenv("USE_COMPOSITE_TOOLS", "0") == "1"
 
 
 def _should_user_scan_now(owner_id: str, interval_min: float) -> bool:
@@ -54,8 +58,16 @@ def _mark_user_scanned(owner_id: str) -> None:
         _user_last_scan_at[owner_id] = datetime.datetime.now()
 
 
-def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: list[str]):
-    """为非风险 pipeline 类型运行轻量级分析（复用已爬取数据）"""
+async def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: list[str]):
+    """P6: 根据 USE_COMPOSITE_TOOLS 开关走新/旧路径。"""
+    if USE_COMPOSITE_TOOLS:
+        await _run_extra_pipelines_composite(owner_id, pipeline_types, keywords)
+    else:
+        await _run_extra_pipelines_legacy(owner_id, pipeline_types, keywords)
+
+
+async def _run_extra_pipelines_legacy(owner_id: str, pipeline_types, keywords):
+    """旧路径：直接实例化 RadarPipeline（保留作为回退）"""
     from .pipeline_configs import PIPELINE_BUILDERS
     from .pipeline import PipelineConfig, RadarPipeline
 
@@ -66,7 +78,6 @@ def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: lis
             continue
 
         try:
-            # 获取未处理的帖子数据
             from .db import get_unprocessed_posts
             from backend.core.config import settings
 
@@ -75,9 +86,7 @@ def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: lis
 
             posts = get_unprocessed_posts(settings.CRAWLER_DB_PATH, platform)
             if posts:
-                import asyncio
-                loop = asyncio.get_running_loop()
-                results = loop.run_until_complete(pipeline.run(posts))
+                results = await pipeline.run(posts)
                 logger.info(
                     f"[Scheduler] {pt} pipeline 完成: {len(results)} 条结果 (user={owner_id[:8]}...)"
                 )
@@ -85,6 +94,59 @@ def _run_extra_pipelines(owner_id: str, pipeline_types: list[str], keywords: lis
                 logger.info(f"[Scheduler] {pt} pipeline: 无未处理数据")
         except Exception as e:
             logger.error(f"[Scheduler] {pt} pipeline 异常: {e}", exc_info=True)
+
+
+async def _run_extra_pipelines_composite(owner_id: str, pipeline_types, keywords):
+    """新路径：走组合工具（★ R-015 关键：set_current_owner 跨线程）"""
+    from backend.services.agent_service.tools._owner import (
+        set_current_owner, reset_current_owner,
+    )
+    from backend.services.agent_service.tools._base import (
+        set_current_cancel_event, get_tool,
+    )
+
+    # ★ R-015 关键：scheduler 线程是新 loop，ContextVar 必须显式 set
+    token = set_current_owner(owner_id)
+    cancel_token = set_current_cancel_event(None)
+    try:
+        for pt in pipeline_types:
+            if pt == "risk":
+                continue  # risk 走原 job_async
+            kw = keywords[0] if keywords else ""
+            plat = ["wb", "xhs"]  # 默认平台（可扩展：读 subscription.platforms）
+
+            if pt == "guide":
+                func = get_tool("deep_analyze_topic")
+                if func is None:
+                    logger.warning("[Scheduler] composite tool deep_analyze_topic 未注册，跳过 guide")
+                    continue
+                result = await func["func"](keyword=kw, analysis_type="guide", platforms=plat)
+            elif pt == "celebrity":
+                func = get_tool("deep_analyze_topic")
+                if func is None:
+                    logger.warning("[Scheduler] composite tool deep_analyze_topic 未注册，跳过 celebrity")
+                    continue
+                result = await func["func"](keyword=kw, analysis_type="celebrity", platforms=plat)
+            elif pt == "briefing":
+                func = get_tool("briefing_digest")
+                if func is None:
+                    logger.warning("[Scheduler] composite tool briefing_digest 未注册，跳过 briefing")
+                    continue
+                result = await func["func"](keyword=kw, platforms=plat)
+            elif pt == "alert":
+                func = get_tool("scan_and_alert")
+                if func is None:
+                    logger.warning("[Scheduler] composite tool scan_and_alert 未注册，跳过 alert")
+                    continue
+                result = await func["func"](keyword=kw, platforms=plat, channel="email")
+            else:
+                logger.warning(f"[Scheduler] 未知 pipeline_type={pt}")
+                continue
+
+            logger.info(f"[Scheduler] {pt} composite 完成 (user={owner_id[:8]})")
+    finally:
+        set_current_cancel_event(None)
+        reset_current_owner(token)
 
 
 def _get_scan_job_id() -> str:
@@ -533,3 +595,135 @@ def _schedule_memory_cleanup():
         misfire_grace_time=600,
     )
     logger.info("[Scheduler] fact_memory 过期清理任务已注册: 03:00 (Asia/Shanghai)")
+
+
+# ============================================================
+# v2.0 P4: 用户工作流调度
+# ============================================================
+
+_MAX_CONCURRENT_WORKFLOWS = 4
+_WF_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_WORKFLOWS)
+_WF_CANCEL_EVENTS: dict = {}
+_WF_CANCEL_LOCK = threading.Lock()
+
+
+def _run_user_workflows():
+    """每分钟检查一次，执行到期的用户工作流。
+
+    ★ R-011 修订：入口 set_trace_id；Semaphore(4) 限流。
+    """
+    set_trace_id(generate_trace_id())
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_run_due_workflows())
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error(f"[Scheduler] _run_user_workflows 异常: {e}", exc_info=True)
+
+
+async def _run_due_workflows():
+    """遍历到期工作流，用 Semaphore 限流执行。"""
+    from backend.services.agent_service.workflows_db import WorkflowsDB
+    db = WorkflowsDB()
+    rows = db.list_due_user_workflows()
+    for row in rows:
+        await _WF_SEMAPHORE.acquire()
+        try:
+            await _execute_workflow_row(row)
+        finally:
+            _WF_SEMAPHORE.release()
+
+
+async def _execute_workflow_row(workflow: dict):
+    """执行单条用户工作流。"""
+    from backend.services.agent_service.workflows_db import execute_workflow_steps
+    from backend.core.metrics import WORKFLOW_EXECUTIONS_TOTAL, WORKFLOW_EXECUTION_DURATION
+    import json as _json
+    wf_id = workflow["id"]
+    owner_id = workflow["owner_id"]
+    steps = _json.loads(workflow["steps_json"])
+
+    cancel_event = asyncio.Event()
+    with _WF_CANCEL_LOCK:
+        _WF_CANCEL_EVENTS[wf_id] = cancel_event
+
+    start = time.time()
+    status = "success"
+    error_msg = ""
+    try:
+        result_json = await execute_workflow_steps(
+            steps=steps,
+            initial_params={},
+            owner_id=owner_id,
+            cancel_event=cancel_event,
+            workflow_id=wf_id,
+            workflow_name=workflow["name"],
+        )
+        result = _json.loads(result_json)
+        duration = time.time() - start
+        if result.get("error"):
+            if result.get("message") == "用户取消":
+                status = "cancelled"
+            else:
+                status = "failed"
+            error_msg = result.get("error", "")
+            WORKFLOW_EXECUTIONS_TOTAL.labels(status=status).inc()
+            if status == "cancelled":
+                WORKFLOW_EXECUTION_DURATION.observe(duration)
+            logger.warning(
+                f"[Workflow] wf={wf_id} {status}: "
+                f"step={result.get('step')} err={error_msg[:100]}"
+            )
+        else:
+            status = "success"
+            logger.info(f"[Workflow] wf={wf_id} success: {duration:.1f}s")
+            WORKFLOW_EXECUTIONS_TOTAL.labels(status="success").inc()
+            WORKFLOW_EXECUTION_DURATION.observe(duration)
+            _push_workflow_result(owner_id, workflow["name"], result.get("results", {}))
+    except Exception as e:
+        duration = time.time() - start
+        status = "failed"
+        error_msg = str(e)
+        WORKFLOW_EXECUTIONS_TOTAL.labels(status="failed").inc()
+        logger.error(f"[Workflow] wf={wf_id} 异常: {e}", exc_info=True)
+        try:
+            from backend.services.admin_service.agent_health_db import AgentHealthDB
+            AgentHealthDB().insert_workflow_log(
+                workflow_id=wf_id, workflow_name=workflow.get("name", ""),
+                owner_id=owner_id, status="failed",
+                duration_seconds=duration,
+                total_steps=len(steps), failed_step=0,
+                error_message=str(e)[:1000],
+            )
+        except Exception:
+            pass
+    finally:
+        with _WF_CANCEL_LOCK:
+            _WF_CANCEL_EVENTS.pop(wf_id, None)
+        try:
+            from backend.services.agent_service.workflows_db import WorkflowsDB
+            WorkflowsDB().mark_workflow_run(wf_id, datetime.datetime.now().isoformat())
+        except Exception:
+            pass
+
+
+def _push_workflow_result(owner_id: str, workflow_name: str, results: dict):
+    """cron 执行成功后推送结果通知。"""
+    try:
+        from backend.services.radar_service.notifier import send_alert
+        send_alert(
+            owner_id=owner_id,
+            keyword=workflow_name,
+            platform="workflow",
+            risk_level=2,
+            risk_class="medium",
+            core_issue=f"定时任务「{workflow_name}」执行完成",
+            report=f"本次执行结果摘要：{len(results)} 个步骤完成",
+            urls=[],
+            post_count=1,
+        )
+    except Exception as e:
+        logger.warning(f"[Workflow] 推送结果失败: {e}")

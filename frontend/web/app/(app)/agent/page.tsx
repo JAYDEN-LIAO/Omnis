@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { useAgentStream } from '@/components/chat/useAgentStream';
 import { MessageStream } from '@/components/chat/MessageStream';
@@ -45,20 +46,37 @@ const SUB_TITLES = [
   '舆情雷达正常运转，24小时不间断监测中。',
   '信息采集系统运行中，已覆盖主要社交媒体平台。',
   '数据流水线畅通，分析引擎就绪。今天重点关注什么？',
-  // 扫描进行中变体
-  '雷达正在进行全网扫描，最新数据正在汇聚。',
-  '正在执行扫描任务，数据更新中，请稍候。',
-  '扫描任务进行中，最新舆情数据即将入库。',
-  '数据采集器正在工作，多平台信息同步中。',
+  // v2.0 能力变体
+  'Phase Plan 规划引擎已就绪，支持约束提取与多步骤工作流。需要规划什么？',
+  '12+ 原子工具 + 4 个组合工具已加载，支持深度话题分析和攻略规划。',
+  '支持用户自定义工作流和 cron 定时调度，自然语言描述即可创建。',
+  '攻略查询引擎就绪，支持跨平台加权观点对比和行程计划生成。',
+  '组合工具已载入：深度分析、扫描预警、攻略规划、简报生成一键执行。',
+  // 管家身份变体
+  'Omnis 已掌握全平台动态，随时听候差遣。今天想分析什么？',
+  '所有能力已就绪，从舆情分析到攻略规划，一句话即可启动。',
+  '监控系统后台运行中，无需操心。需要我帮你做什么？',
+  '24 小时在线，支持深度分析、工作流调度、定时任务。请随时吩咐。',
+  '数据持续更新中，Omnis 替你盯着。你 focus 在决策上就好。',
+  '原子工具 + 组合工作流已加载，要跑一次深度分析还是查攻略？',
+  'Phase Plan 规划引擎已就绪，复杂任务交给你，拆解步骤交给我。',
+  '全平台数据流畅通，想查什么直接说，不用自己翻各平台。',
+  '订阅监控自动运行中，Omnis 会主动汇报异常。安心做你的事。',
+  '工作流引擎待命中，任何周期性任务都可以用自然语言创建。',
+  '从采集到分析到推送，Omnis 全链路可编排。今天想自动化什么？',
+  '除了盯舆情，我还能帮你查攻略、做对比、生成简报。试试看？',
+  '定时任务、模板匹配、约束规划都已准备就绪。随时可以启动。',
+  '跨平台加权对比引擎已加载，需要比较什么产品或目的地？',
+  'Omnis 不只是监控工具，更是你的策略助手。想知道什么？',
 ];
 
 const WELCOME_PILLS = [
   { icon: 'travel_explore', label: '全网舆情分析', prompt: '分析当前全网舆情态势，包括情感趋势、热门话题和风险概览' },
+  { icon: 'psychology', label: '深度话题分析', prompt: '对某个话题做深度分析：采集帖子、过滤、聚类、提取槽位、加权对比，输出结构化报告' },
+  { icon: 'map', label: '攻略查询规划', prompt: '查询某个目的地的攻略：搜索帖子、过滤攻略内容、聚类、提取槽位、生成行程计划和预算估算' },
   { icon: 'bookmark_manager', label: '订阅管理中心', prompt: '查看和管理我的监控订阅，包括关键词、人物、事件和竞品订阅' },
+  { icon: 'account_tree', label: '工作流管理', prompt: '查看我的工作流列表，管理定时任务，查看预设组合工具' },
   { icon: 'notifications_active', label: '风险监控预警', prompt: '查看当前的舆情风险预警列表和高风险话题' },
-  { icon: 'schedule', label: '定时扫描配置', prompt: '查看和配置自动扫描的频率和时间设置' },
-  { icon: 'hub', label: '推送通道设置', prompt: '查看和配置企业微信、飞书、邮箱等推送通道' },
-  { icon: 'monitoring', label: '系统运行状态', prompt: '查看 Omnis 系统运行状态、调度器和各模块健康情况' },
 ];
 
 export default function AgentPage() {
@@ -67,10 +85,29 @@ export default function AgentPage() {
   const [history, setHistory] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
   const [pendingSessions, setPendingSessions] = useState<AgentSession[]>([]);
+  const [greeting, setGreeting] = useState('');
+  const [subtitle, setSubtitle] = useState('');
+  const [greetingAnimKey, setGreetingAnimKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
-  const [subtitle] = useState(() => SUB_TITLES[Math.floor(Math.random() * SUB_TITLES.length)]);
+  const pendingSessionsRef = useRef<AgentSession[]>([]);
+
+  // 招呼语初始化 + 刷新（每次新对话重新随机选取）
+  const refreshGreeting = useCallback(() => {
+    setGreeting(GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
+    setSubtitle(SUB_TITLES[Math.floor(Math.random() * SUB_TITLES.length)]);
+    setGreetingAnimKey((k) => k + 1);
+  }, []);
+
+  useEffect(() => {
+    refreshGreeting();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 保持 ref 与 state 同步（避免闭包过期问题）
+  useEffect(() => {
+    pendingSessionsRef.current = pendingSessions;
+  }, [pendingSessions]);
 
   const { assistant, isStreaming, error, send, cancel, reset } = useAgentStream();
 
@@ -181,8 +218,25 @@ export default function AgentPage() {
   const isGuestUser = isGuest();
 
   const startNewSession = () => {
-    // 当前已是空对话则不重复创建空白 session
-    if (history.length === 0 && sessionId) return;
+    // 1) 当前已是空对话 — 只刷新招呼语，不重复创建
+    if (history.length === 0 && sessionId) {
+      refreshGreeting();
+      return;
+    }
+
+    // 2) 检查是否已有未使用的空 session（避免无限堆叠）
+    const existingEmpty = pendingSessionsRef.current.find(
+      (p) => !backendSessions.some((b: AgentSession) => b.session_id === p.session_id)
+    );
+    if (existingEmpty) {
+      setSessionId(existingEmpty.session_id);
+      setHistory([]);
+      reset();
+      refreshGreeting();
+      return;
+    }
+
+    // 3) 创建全新 session
     reset();
     const newId = crypto.randomUUID();
     setSessionId(newId);
@@ -191,6 +245,7 @@ export default function AgentPage() {
       if (prev.some((s) => s.session_id === newId)) return prev;
       return [{ session_id: newId, title: '新对话' }, ...prev];
     });
+    refreshGreeting();
   };
 
   return (
@@ -253,12 +308,22 @@ export default function AgentPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 space-y-12 pb-32">
           {/* Welcome greeting — 始终在顶部，副标题+功能按钮永久显示 */}
           <section className="max-w-3xl mx-auto pt-12">
-            <h3 className="serif-headline text-4xl lg:text-5xl text-[color:var(--on-surface)] mb-6 opacity-95">
-              {greeting}, {user?.nickname || 'Analyst'}.
-            </h3>
-            <p className="text-lg text-[color:var(--on-surface-variant)] mb-8 max-w-xl">
-              {subtitle}
-            </p>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={greetingAnimKey}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -14 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+              >
+                <h3 className="serif-headline text-4xl lg:text-5xl text-[color:var(--on-surface)] mb-6 opacity-95">
+                  {greeting}, {user?.nickname || 'Analyst'}.
+                </h3>
+                <p className="text-lg text-[color:var(--on-surface-variant)] mb-8 max-w-xl">
+                  {subtitle}
+                </p>
+              </motion.div>
+            </AnimatePresence>
             <div className="flex flex-wrap gap-2">
               {WELCOME_PILLS.map((pill) => (
                 <button

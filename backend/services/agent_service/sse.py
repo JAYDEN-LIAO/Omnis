@@ -83,3 +83,33 @@ def emit_session(session_id: str) -> str:
 
 def emit_done() -> str:
     return "event: done\ndata:\n\n"
+
+
+# ============================================================
+# v2.0 P2: 规划事件
+# ============================================================
+
+
+def emit_plan(plan: dict) -> str:
+    """通知前端 Agent 的规划结果"""
+    return emit("plan", {
+        "goal": plan.get("goal", ""),
+        "steps": plan.get("steps", []),
+        "mode": plan.get("mode", "immediate"),
+        "constraints": plan.get("constraints", {}),
+        "from_template": plan.get("from_template", False),
+    })
+
+
+def emit_plan_adjusted(plan: dict) -> str:
+    """通知前端计划已动态调整"""
+    return emit("plan_adjusted", {
+        "note": plan.get("adjustment_note", ""),
+        "steps": plan.get("steps", []),
+        "adjustment_count": plan.get("adjustment_count", 0),
+    })
+
+
+def emit_done_with_message(message: str) -> str:
+    """phase_plan 完成且 mode=scheduled 时使用，带文本说明"""
+    return emit("done_with_message", {"message": message})

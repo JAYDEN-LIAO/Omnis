@@ -1,0 +1,9 @@
+2026-06-13 11:16:43 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 1 条过期记录（cutoff=1781320004）
+2026-06-13 17:23:54 - WARNING - [core.login_lockout:137] - [LoginLockout] email no@no.com 已触发锁定 5 次失败 → 锁定 300s
+2026-06-13 17:33:51 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 5 条过期记录（cutoff=1781342632）
+2026-06-13 17:40:16 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 3 条过期记录（cutoff=1781343017）
+2026-06-13 17:44:46 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 1 条过期记录（cutoff=1781343286）
+2026-06-13 17:53:41 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 2 条过期记录（cutoff=1781343821）
+2026-06-13 17:59:06 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 2 条过期记录（cutoff=1781344147）
+2026-06-13 22:08:24 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 7 条过期记录（cutoff=1781359104）
+2026-06-13 22:23:36 - INFO - [core.login_lockout:230] - [LoginLockout] 清理 2 条过期记录（cutoff=1781360017）

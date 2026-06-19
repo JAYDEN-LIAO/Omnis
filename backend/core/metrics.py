@@ -72,3 +72,21 @@ AGENT_MEMORY_WRITES = Counter(
     "Agent 记忆写入次数",
     ["status"]  # status: success / error
 )
+
+# ──────────────── v2.0 P7: 工作流 + 规划监控 ────────────────
+
+WORKFLOW_EXECUTIONS_TOTAL = Counter(
+    "workflow_executions_total",
+    "Workflow execution count by status",
+    ["status"]  # status: success / failed / cancelled
+)
+WORKFLOW_EXECUTION_DURATION = Histogram(
+    "workflow_execution_duration_seconds",
+    "Workflow execution duration in seconds",
+    buckets=[5, 15, 30, 60, 120, 300, 600]
+)
+AGENT_PLAN_GENERATION_TOTAL = Counter(
+    "agent_plan_generation_total",
+    "Plan generation count by status",
+    ["status"]  # status: success / fallback / template_hit / parse_error
+)

@@ -1,24 +1,94 @@
 # MediaRadar
 
-Multi-platform social media monitoring, search engine, and AI-powered opinion analysis system.
+Multi-platform social media monitoring, AI-powered opinion analysis, and intelligent alerting system.
 
-## Overview
+MediaRadar is a full-stack platform that crawls content from Chinese social media (Weibo, Xiaohongshu, Bilibili, etc.), analyzes it with a multi-agent LLM pipeline, and delivers actionable intelligence via email/WeCom/Feishu/RSS.
 
-MediaRadar is a full-stack platform for crawling, searching, and analyzing public opinion across Chinese social media platforms. It supports real-time search, scheduled monitoring, AI-powered risk assessment, and multi-channel alerting.
+## Architecture
 
-### Key Features
+### 3-Layer Agent Architecture (v2.0)
 
-- **Media Search Engine** — On-demand crawling across 7 platforms (Weibo, Xiaohongshu, Bilibili, Douyin, Kuaishou, Tieba, Zhihu)
-- **Opinion Monitoring** — Scheduled crawling + AI analysis with risk level assessment
-- **Multi-Agent AI Analysis** — LangGraph pipeline: analyst → reviewer → director
-- **Multi-channel Alerts** — Email, WeCom, Feishu push notifications + RSS subscription
-- **Subscription Engine** — Per-user subscriptions with type/polarity/sensitivity/push_mode control
-- **Per-User Isolation** — Each user's data, config, and alerts are fully isolated
-- **AI Chat Agent** — 26 function-calling tools across 7 groups for natural language system control
-- **Multi-user & Auth** — Email/password registration + Google OAuth + JWT + API Key dual auth
-- **Web Dashboard** — Next.js 15 + Tailwind CSS + shadcn/ui
-- **WeChat Mini Program** — uni-app mobile client
-- **Prometheus Metrics** — LLM calls, pipeline duration, agent metrics
+```
+User Input
+     │
+     ▼
+┌──────────────────────────────────┐
+│  phase_plan (Planning Layer)    │
+│  • Constraint extraction        │
+│  • Template matching            │
+│  • LLM task decomposition       │
+│  • Dynamic adjustment           │
+│                                  │
+│  mode=immediate ──────┐         │
+│  mode=scheduled ──────┼──┐      │
+└───────────────────────┼──┼──────┘
+          │             │  │
+          ▼             │  ▼
+     Execution Loop     │  user_workflows
+     • Progress hints   │  (APScheduler)
+     • Cancel checkpoints│     │
+     • Criticality       │     ▼
+          │             │  execute_workflow_steps
+          ▼             │
+          │             │
+          ▼             ▼
+┌──────────────────────────────────┐
+│  Tool Layer (50+ tools)         │
+│                                  │
+│  • Atomic tools (13)            │
+│    search_posts · filter_content │
+│    cluster_related · compare_   │
+│    opinions · analyze_sentiment │
+│    calc_velocity · push_report  │
+│                                  │
+│  • Preset workflows as tools (4)│
+│    deep_analyze_topic (workflow) │
+│    quick_guide (workflow)       │
+│    scan_and_alert (workflow)    │
+│    briefing_digest (workflow)   │
+│                                  │
+│  • Legacy management tools (~30)│
+│    A: subscription · B: scan    │
+│    C: query · D: push · E: model│
+│    G: system status             │
+└──────────────────────────────────┘
+          │
+          ▼
+┌──────────────────────────────────┐
+│  Pipeline Internal Stages       │
+│  (screener → vision → cluster   │
+│   → LangGraph analysis → alert) │
+└──────────────────────────────────┘
+```
+
+The system evolved from a reactive tool-calling loop into a **plan-driven architecture**: an intelligent planner decomposes complex requests, and the execution loop calls tools (including preset workflows registered as tools) to fulfill each step.
+
+### Multi-Pipeline Support
+
+Four pipeline modes, sharing the same Screener→Cluster→Analysis skeleton:
+
+| Mode | Purpose | Analysis Sub-Graph |
+|------|---------|-------------------|
+| `full` | Risk sentiment monitoring | Analyst → Reviewer → Director |
+| `guide` | Travel/guide content analysis | Extractor → Comparer → Summarizer |
+| `celebrity` | Celebrity trend tracking | Sentiment → Heat → Aggregator |
+| `briefing` | Daily news digest | Categorizer → Highlighter → Writer |
+
+## Features
+
+- **Multi-Platform Crawling** — Weibo, Xiaohongshu, Bilibili, Douyin, Kuaishou, Tieba, Zhihu
+- **AI-Powered Analysis** — LangGraph pipeline with analyst/reviewer/director agents (DeepSeek + Kimi cross-validation)
+- **Intelligent Planning** — Automatic task decomposition for complex multi-step requests (e.g., "compare Li Auto and NIO service discussions across Weibo and Xiaohongshu over the past week")
+- **User Workflows** — Save, schedule (cron), and manage custom workflows via natural language
+- **Multi-Channel Alerts** — Email, WeCom, Feishu push + RSS feed
+- **Subscription Engine** — Per-user configurable subscriptions with type/polarity/sensitivity control
+- **AI Chat Agent** — 50+ function-calling tools across 9 groups for natural language system control
+- **Per-User Isolation** — Complete data, config, and alert separation
+- **Interrupt Mechanism** — 3-layer cancellation (Agent SSE / Pipeline / Crawler) with resource cleanup
+- **Admin Monitoring** — Real-time agent metrics, workflow execution logs, trend analysis, LLM-powered health reports
+- **Web Dashboard** — Next.js 15 + shadcn/ui + Framer Motion
+- **WeChat Mini Program** — uni-app (Vue 3) mobile client
+- **Observability** — Prometheus metrics (LLM calls, pipeline duration, agent turns, workflow executions)
 
 ## Tech Stack
 
@@ -27,11 +97,12 @@ MediaRadar is a full-stack platform for crawling, searching, and analyzing publi
 | Backend | Python 3.11, FastAPI, SQLite |
 | AI/LLM | LangGraph, DeepSeek, Kimi, Qwen-VL, BGE-M3 |
 | Crawler | Playwright, httpx |
-| Frontend (Web) | Next.js 15, Tailwind CSS, shadcn/ui, Framer Motion |
-| Frontend (Mini) | uni-app (Vue 3) |
+| Frontend (Web) | Next.js 15, Tailwind CSS 4, shadcn/ui (Radix + Base UI), Framer Motion |
+| Frontend (Mobile) | uni-app (Vue 3) |
 | Auth | JWT (HS256), bcrypt, Google OAuth 2.0 |
 | Scheduler | APScheduler |
-| Monitoring | Prometheus |
+| Monitoring | Prometheus, custom Admin Agent Monitor |
+| Vector | HDBSCAN clustering, text embeddings |
 
 ## Quick Start
 
@@ -43,10 +114,9 @@ MediaRadar is a full-stack platform for crawling, searching, and analyzing publi
 ### Backend
 
 ```bash
-cd backend
-pip install -r ../requirements.txt
-cp ../.env.example ../.env   # Edit with your API keys
-python gateway/main.py       # API at http://localhost:8008
+pip install -r requirements.txt
+cp .env.example .env   # Edit with your API keys
+python backend/gateway/main.py   # API at http://localhost:8008
 ```
 
 ### Web Frontend
@@ -54,7 +124,7 @@ python gateway/main.py       # API at http://localhost:8008
 ```bash
 cd frontend/web
 npm install
-npm run dev                  # UI at http://localhost:3003
+npm run dev   # UI at http://localhost:3003
 ```
 
 ### Mini Program
@@ -69,61 +139,90 @@ npm install
 
 ```
 backend/
-├── gateway/main.py           # FastAPI entry point (port 8008)
-├── core/                     # Core components
-│   ├── config.py             # Settings (3-tier fallback: DEFAULT→LLM→hardcoded)
-│   ├── auth*.py              # JWT, user DB, auth deps, login lockout
-│   ├── subscription_db.py    # Subscription CRUD (per-owner)
-│   ├── quota_db.py           # Per-user quota management
-│   ├── model_config_db.py    # Per-agent model config with fallback
-│   ├── agent_memory_db.py    # Session memory persistence
-│   ├── circuit_breaker.py    # LLM circuit breaker
-│   ├── logger.py             # Structured logging (JSON/colored)
-│   ├── metrics.py            # Prometheus metrics
-│   ├── sanitize.py           # HTML sanitization
-│   ├── security_middleware.py # Security headers & body size limit
-│   └── rate_limiter.py       # Rate limiter (skips unauthenticated non-auth paths)
+├── gateway/main.py              # FastAPI entry (port 8008, mounts all routers)
+├── core/                        # Shared infrastructure
+│   ├── config.py                # 3-tier config fallback
+│   ├── auth*.py                 # JWT, user CRUD, auth deps, login lockout
+│   ├── database.py              # SQLite connection management
+│   ├── metrics.py               # Prometheus metrics (incl. workflow/plan counters)
+│   ├── circuit_breaker.py       # Per-tool LLM circuit breaker
+│   ├── logger.py                # Structured JSON logging
+│   ├── sanitize.py              # HTML/URL sanitization
+│   ├── security_middleware.py   # Security headers + body size limit
+│   ├── rate_limiter.py          # Rate limiter
+│   ├── subscription_db.py       # Subscription CRUD (per-owner)
+│   ├── quota_db.py              # Per-user quota management
+│   ├── model_config_db.py       # Per-agent-role model config with fallback
+│   └── agent_memory_db.py       # Session memory persistence
 ├── services/
-│   ├── radar_service/        # Opinion monitoring core
-│   │   ├── pipeline.py       # Pipeline orchestrator (Screener→Vision→Cluster→Alert)
-│   │   ├── llm_gateway.py    # LangGraph analysis sub-graph (analyst→reviewer→director)
-│   │   ├── db_manager.py     # SQLite operations
-│   │   ├── scheduler.py      # APScheduler (per-user scan + daily summary)
-│   │   ├── push_generator.py # HTML email templates
-│   │   └── notifier/         # Alert pushes (email/wecom/feishu/rss)
-│   ├── agent_service/        # AI chat agent (26 tools, SSE streaming)
-│   │   ├── agent_core.py     # Chat engine + function calling
-│   │   ├── tools/            # Tool modules by group (subscription/scan/query/push/model/system)
-│   │   └── memory/           # Agent memory (jieba, TTL cache)
-│   ├── auth_service/         # Multi-user auth & OAuth
-│   │   └── oauth_providers/  # Google OAuth
-│   ├── subscription_service/ # Subscription/quota/admin API
-│   ├── search_lib/           # Search library
-│   └── crawler_service/      # Platform crawlers (independent, port 8080)
+│   ├── agent_service/           # AI chat agent (core of v2.0 upgrade)
+│   │   ├── agent_core.py        # Planning engine + execution loop + CancelRegistry
+│   │   ├── sse.py               # SSE event factory (text/tool_call/plan/progress)
+│   │   ├── workflows_db.py      # Unified workflow storage (preset/auto_template/user)
+│   │   ├── tools/               # 50+ function-calling tools in 9 groups
+│   │   │   ├── atomic.py        # H group: 13 atomic tools
+│   │   │   ├── composite.py     # I group: 4 composite tools (dynamic registration)
+│   │   │   ├── subscription.py  # A group: subscription management
+│   │   │   ├── scan.py          # B group: scan/schedule control
+│   │   │   ├── query.py         # C group: data query + web search
+│   │   │   ├── push.py          # D group: push channel management
+│   │   │   ├── model.py         # E group: model configuration
+│   │   │   ├── system.py        # G group: system status
+│   │   │   ├── guide.py         # Guide pipeline query tool
+│   │   │   ├── celebrity.py     # Celebrity pipeline query tool
+│   │   │   ├── briefing.py      # Briefing pipeline query tool
+│   │   │   ├── sentiment_dict.py# Domain sentiment dictionary
+│   │   │   ├── _base.py         # @tool decorator + registration
+│   │   │   └── _owner.py        # @with_owner owner_id injection
+│   │   └── memory/              # Session memory (jieba + TTL cache)
+│   ├── radar_service/           # Opinion monitoring engine
+│   │   ├── pipeline.py          # Pipeline orchestrator (4 modes, PipelineCanceller)
+│   │   ├── llm_gateway.py       # LangGraph analysis sub-graph
+│   │   ├── analysis_graph*.py   # 4 analysis sub-graphs (risk/guide/celebrity/briefing)
+│   │   ├── pipeline_configs.py  # Pipeline config builders
+│   │   ├── prompt_templates.py  # Screener prompts + PLAN_PROMPT
+│   │   ├── scheduler.py         # APScheduler (scan + daily summary + user workflows)
+│   │   ├── db_manager.py        # SQLite operations
+│   │   ├── push_generator.py    # HTML email templates
+│   │   └── notifier/            # Alert push channels (email/wecom/feishu/rss)
+│   ├── auth_service/            # Multi-user auth & OAuth
+│   │   └── oauth_providers/     # Google OAuth
+│   ├── subscription_service/    # Subscription/quota/admin API
+│   ├── admin_service/           # Agent monitoring & ops
+│   │   ├── agent_monitor.py     # Prometheus aggregation layer
+│   │   ├── agent_health_db.py   # Diagnosis events + workflow execution logs
+│   │   ├── agent_ops.py         # LLM-powered health scans / daily reports
+│   │   └── api.py               # REST endpoints + WebSocket
+│   ├── search_lib/              # Search library
+│   └── crawler_service/         # Platform crawlers (independent module)
 frontend/
-├── web/                      # Next.js dashboard (port 3003)
-└── MiniApp/                  # uni-app mobile
-scripts/                      # P1-P3 verification test scripts
-```
-
-## Core Architecture
-
-```
-Search / Cron Trigger
-        │
-        ▼
-  Pipeline Orchestrator
-  ① Screener → ② Vision → ③ Cluster
-                                  │
-                                  ▼
-                       LangGraph Analysis
-                       Analyst → Reviewer → Director
-                                  │
-                                  ▼
-                         Alert / Push Notification
+├── web/                         # Next.js 15 dashboard (port 3003)
+│   ├── app/(app)/               # Authenticated routes
+│   │   ├── dashboard/           # Stats + charts (Recharts)
+│   │   ├── agent/               # AI chat interface (SSE streaming)
+│   │   ├── yq-list/             # Opinion list (TanStack Table + Virtual)
+│   │   └── settings/            # Account / LLM / Push / System
+│   └── components/
+│       ├── layout/              # Sidebar + Topbar
+│       ├── ui/                  # shadcn/ui components
+│       └── charts/              # Chart wrappers
+└── MiniApp/                     # uni-app mobile client
+upgrade2.0/                      # v2.0 upgrade design documents
+deploy/                          # Deployment configs
+scripts/                         # Verification test scripts
 ```
 
 ## API Overview
+
+### AI Agent (`agent_service`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/agent/chat` | POST | AI chat (SSE stream: text/tool_call/tool_progress/plan/done) |
+| `/api/agent/chat/{session_id}/cancel` | POST | Cancel running session |
+| `/api/agent/workflows/{workflow_id}/cancel` | POST | Cancel running workflow |
+| `/api/agent/memory` | GET | Session list |
+| `/api/agent/memory/{session_id}` | GET/DELETE | Session detail/delete |
+| `/api/agent/memory/{session_id}/messages` | GET | Session messages |
 
 ### Auth (`auth_service`)
 | Endpoint | Method | Description |
@@ -177,13 +276,6 @@ Search / Cron Trigger
 | `/api/llm/config/{agent}` | POST | Update agent model config |
 | `/api/llm/test/{agent}` | POST | Test agent connectivity |
 
-### AI Agent (`agent_service`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/agent/chat` | POST | AI chat (SSE stream) |
-| `/api/agent/memory` | GET | Session list |
-| `/api/agent/memory/{id}` | GET/DELETE | Session detail/delete |
-
 ### Subscription (`subscription_service`)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -198,27 +290,74 @@ Search / Cron Trigger
 | `/api/admin/users/{id}/deactivate` | POST | Deactivate user (admin) |
 | `/api/admin/users/{id}/role` | POST | Change role (admin) |
 
+### Admin Agent Monitoring
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/agents/overview` | GET | Agent/system/workflow overview |
+| `/api/admin/agents/tools` | GET | Per-tool health stats |
+| `/api/admin/agents/sessions` | GET | Active sessions |
+| `/api/admin/agents/diagnosis` | GET | Diagnosis event log |
+| `/api/admin/agents/memory` | GET | Memory statistics |
+| `/api/admin/agents/report` | GET | LLM-generated health scan report |
+| `/api/admin/agents/report/daily` | GET | 24h ops daily report (LLM) |
+| `/api/admin/agents/chat` | POST | Natural language query of system state |
+| `/api/admin/agents/workflows` | GET | Workflow execution stats (multi-dimension filter) |
+| `/api/admin/agents/workflows/{id}` | GET | Single workflow execution history |
+| `/api/admin/agents/workflows/{id}/trend` | GET | Workflow trend analysis |
+| `/api/admin/agents/workflows/{id}/cancel` | POST | Cancel running workflow (admin) |
+| `/api/admin/agents/planning` | GET | Planning stage statistics |
+| `/api/admin/agents/ws` | WS | Real-time monitoring WebSocket |
+
 ### Gateway
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/metrics` | GET | Prometheus metrics |
-| `/health` | GET | Health check (includes scheduler status) |
+| `/health` | GET | Health check (incl. scheduler status) |
 
 ## AI Agent
 
-The AI assistant has 26 function-calling tools across 7 groups:
+The AI assistant has **50+ function-calling tools** across 9 groups, organized in a 3-layer hierarchy:
+
+| Layer | Group | Tools | Purpose |
+|-------|-------|-------|---------|
+| **Atomic** | H (atomic) | 13 | Primitive operations: search, filter, cluster, sentiment, compare, report |
+| **Composite** | I (composite) | 4 | Orchestrated multi-step workflows registered dynamically |
+| **Query** | — | 3 | Pipeline-specific queries (guide/celebrity/briefing reports) |
+| **Legacy** | A-G | ~30 | Subscription, scan, data query, push, model, system management |
+
+### Tool Groups
 
 | Group | Tools | Purpose |
 |-------|-------|---------|
 | A | 5 | Subscription management + intent parsing |
-| B | 6 | Scan/schedule control |
+| B | 6+ | Scan/schedule control (trigger, pause, resume, crawl status) |
 | C | 3 | Data query + web search |
-| D | 4 | Push channel management |
+| D | 4 | Push channel management (email/wecom/feishu) |
 | E | 3 | Model configuration |
-| F | — | Reserved for system tools |
+| F | — | Reserved |
 | G | 1 | System status |
+| H (atomic) | 13 | `search_posts`, `filter_content`, `cluster_related`, `extract_slots`, `compare_opinions`, `generate_itinerary`, `analyze_sentiment`, `calc_velocity`, `compare_platforms`, `query_report`, `push_report`, `list_workflows`, `manage_workflow` |
+| I (composite) | 4 | `deep_analyze_topic`, `quick_guide`, `scan_and_alert`, `briefing_digest` |
 
-The agent uses a streaming SSE chat endpoint and maintains per-session memory with jieba keyword extraction and TTL-based cache cleanup.
+### Key Capabilities
+
+- **Intelligent Planning**: Complex multi-step requests are automatically decomposed by `phase_plan` with constraint extraction, template reuse, and LLM-based step generation
+- **Progress Awareness**: The execution loop injects progress hints with remaining steps, preventing LLM drift in long chains
+- **Dynamic Adjustment**: If a step returns unexpected results, `_maybe_adjust_plan` rewrites remaining steps
+- **User Workflows**: Users can create custom workflows via natural language ("scan NIO every morning at 9am and alert me"), stored in the unified `workflows` table with cron scheduling
+- **Cancel Support**: 3-layer cancellation (Agent SSE / Pipeline / Crawler) with resource cleanup
+
+## Model Configuration
+
+Each agent role can be configured independently, with fallback to the **default model**:
+
+| Role | Purpose |
+|------|---------|
+| Default | Fallback for all agents |
+| Analyst | Risk level assessment |
+| Reviewer | Cross-validation |
+| Vector Engine | Text clustering (BGE-M3) |
+| Vision Engine | Image evidence analysis (Qwen-VL) |
 
 ## Configuration
 

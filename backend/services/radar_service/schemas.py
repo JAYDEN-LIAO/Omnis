@@ -5,7 +5,7 @@
 供其他模块导入使用。
 """
 
-from typing import TypedDict
+from typing import Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
@@ -78,6 +78,47 @@ class BriefingScreenerResult(BaseModel):
     needs_vision: bool = Field(default=False, description="是否需要看图")
     matched_keyword: str = Field(default="", description="匹配到的关键词")
     reason: str = Field(default="", description="判断理由")
+
+
+# ============================================================
+# v2.0 P0 新增：Guide / Opinion / Itinerary 输出 Schema
+# ============================================================
+
+
+class WeightedOpinion(BaseModel):
+    """跨平台加权观点"""
+    point: str = Field(description="观点内容")
+    support_count: int = Field(default=0, description="支持数")
+    oppose_count: int = Field(default=0, description="反对数")
+    neutral_count: int = Field(default=0, description="中立数")
+    platforms: dict[str, int] = Field(default_factory=dict, description="各平台分布")
+    weighted_score: float = Field(default=3.0, description="加权评分 1-5")
+    recommendation: str = Field(default="中立", description="推荐/谨慎/不推荐")
+
+
+class GuideSlot(BaseModel):
+    """攻略信息槽位"""
+    time_slot: str = Field(default="", description="上午/午餐/下午/晚上/全天")
+    location: str = Field(default="", description="地点")
+    action: str = Field(default="", description="参观/用餐/住宿/购物")
+    description: str = Field(default="", description="详细描述")
+    rating: int = Field(default=1, description="评分 1-5")
+    cost_min: int = Field(default=0, description="最低花费")
+    cost_max: int = Field(default=0, description="最高花费")
+    platform: str = Field(default="", description="来源平台 xhs/bili/zhihu")
+    author_type: str = Field(default="", description="素人/KOL/商家")
+    confidence: float = Field(default=0.8, description="置信度 0-1")
+
+
+class GuidePlanOutput(BaseModel):
+    """完整的攻略规划输出"""
+    keyword: str = Field(description="关键词")
+    itinerary: list[dict] = Field(default_factory=list, description="多日行程列表")
+    budget: dict = Field(default_factory=dict, description="{min, max, unit, note}")
+    high_confidence: list[WeightedOpinion] = Field(default_factory=list, description="高置信观点")
+    controversial: list[WeightedOpinion] = Field(default_factory=list, description="争议观点")
+    tips: list[dict] = Field(default_factory=list, description="实用贴士")
+    source_summary: dict[str, int] = Field(default_factory=dict, description="来源统计")
 
 
 class RadarGraphState(TypedDict):
