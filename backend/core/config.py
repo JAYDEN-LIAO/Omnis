@@ -128,6 +128,7 @@ class Settings:
     WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "").strip()
     WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "").strip()
     OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "https://omnis.jaydennn.xyz").strip()
+    OAUTH_HTTPS_PROXY = os.getenv("OAUTH_HTTPS_PROXY", "").strip()
 
     # ======== 日志配置 ========
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
