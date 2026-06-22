@@ -85,11 +85,7 @@ def exchange_code_for_token(code: str) -> Dict[str, any]:
         "grant_type": "authorization_code",
     }
     try:
-        client_args = {"timeout": 15.0}
-        if settings.OAUTH_HTTPS_PROXY:
-            client_args["proxies"] = settings.OAUTH_HTTPS_PROXY
-        with httpx.Client(**client_args) as _client:
-            resp = _client.post(GOOGLE_TOKEN_URL, data=data)
+        resp = httpx.post(GOOGLE_TOKEN_URL, data=data, timeout=15.0)
     except httpx.HTTPError as e:
         raise OAuthExchangeError(f"Google token 端点连接失败: {e}") from e
 
@@ -112,11 +108,7 @@ def fetch_userinfo(access_token: str) -> Dict[str, any]:
     """
     headers = {"Authorization": f"Bearer {access_token}"}
     try:
-        client_args = {"timeout": 15.0}
-        if settings.OAUTH_HTTPS_PROXY:
-            client_args["proxies"] = settings.OAUTH_HTTPS_PROXY
-        with httpx.Client(**client_args) as _client:
-            resp = _client.get(GOOGLE_USERINFO_URL, headers=headers)
+        resp = httpx.get(GOOGLE_USERINFO_URL, headers=headers, timeout=15.0)
     except httpx.HTTPError as e:
         raise OAuthExchangeError(f"Google userinfo 端点连接失败: {e}") from e
 
