@@ -10,6 +10,7 @@ WS4: /api/auth/* 路由
 """
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
 from backend.core.config import settings
@@ -352,7 +353,7 @@ async def oauth_login(provider: str):
         }
     try:
         authorize_url, state = google_oauth.build_authorize_url()
-        return {"code": 200, "msg": "OK", "data": {"provider": "google", "authorize_url": authorize_url, "state": state}}
+        return RedirectResponse(url=authorize_url, status_code=302)
     except Exception as e:
         logger.error(f"[AuthAPI] Google 授权 URL 构造失败: {e}", exc_info=True)
         return {"code": 500, "msg": f"Google OAuth 初始化失败: {e}", "data": None}
@@ -364,10 +365,10 @@ async def oauth_callback(provider: str, code: str, state: str = ""):
     if provider != "google":
         raise HTTPException(status_code=400, detail={"code": 400, "msg": "不支持的 provider", "data": None})
 
-    # ── dev mock（仅 ENV=dev 时允许，生产环境直接拒绝） ──
-    if settings.ENV != "dev":
-        raise HTTPException(status_code=403, detail={"code": 403, "msg": "mock 登录仅开发环境可用", "data": None})
+    # ── dev mock（仅 ENV=dev 时允许） ──
     if code in ("PLACEHOLDER", "xxx", "mock", "dev"):
+        if settings.ENV != "dev":
+            raise HTTPException(status_code=403, detail={"code": 403, "msg": "mock 登录仅开发环境可用", "data": None})
         import uuid
         mock_oauth_id = f"mock-google-{code}-{uuid.uuid4().hex[:8]}"
         mock_email = f"dev-google-{uuid.uuid4().hex[:4]}@dev.local"
@@ -382,16 +383,8 @@ async def oauth_callback(provider: str, code: str, state: str = ""):
         update_last_login(user["id"])
         access = encode_access_token(user["id"], user["role"])
         refresh = encode_refresh_token(user["id"], user["role"])
-        return {
-            "code": 200,
-            "msg": "Google 登录成功（dev mock）",
-            "data": {
-                "token": access,
-                "access_token": access,
-                "refresh_token": refresh,
-                "user": {"user_id": user["id"], "nickname": user["nickname"], "role": user["role"]},
-            },
-        }
+        redirect_url = f"{settings.OAUTH_REDIRECT_BASE}/auth/callback?token={access}"
+        return RedirectResponse(url=redirect_url, status_code=302)
 
     # ── 真实 Google OAuth ──
     from .oauth_providers import google as google_oauth
@@ -422,16 +415,8 @@ async def oauth_callback(provider: str, code: str, state: str = ""):
     access = encode_access_token(user["id"], user["role"])
     refresh = encode_refresh_token(user["id"], user["role"])
     logger.info(f"[AuthAPI] Google 登录成功 user_id={user['id']} email={email}")
-    return {
-        "code": 200, "msg": "Google 登录成功",
-        "data": {
-            "token": access,
-            "access_token": access,
-            "refresh_token": refresh,
-            "user": {"user_id": user["id"], "nickname": user["nickname"], "avatar_url": user.get("avatar_url"), "role": user["role"]},
-            "redirect_to": f"/auth/callback?token={access}",
-        },
-    }
+    redirect_url = f"{settings.OAUTH_REDIRECT_BASE}/auth/callback?token={access}"
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 # ==================== /api/admin/* ====================

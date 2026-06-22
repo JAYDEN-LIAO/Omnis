@@ -97,99 +97,99 @@ function LoginForm() {
 
         {/* Message waterfall */}
         <div className="msg-waterfall">
-          <div className="msg-item" style={{ left: '11.6%', animationDelay: '-1.8s', animationDuration: '32.3s' }}>
+          <div className="msg-item" style={{ left: '11.6%', animationDelay: '-21.8s', animationDuration: '32.3s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>华为 Mate 80 折叠屏跑分曝光，性能提升 40%</span>
           </div>
-          <div className="msg-item" style={{ left: '23.5%', animationDelay: '-1.5s', animationDuration: '28.8s' }}>
+          <div className="msg-item" style={{ left: '23.5%', animationDelay: '-21.5s', animationDuration: '28.8s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>青岛三天两夜旅游攻略，人均 800 玩到爽</span>
           </div>
-          <div className="msg-item" style={{ left: '37.7%', animationDelay: '-0.8s', animationDuration: '33.9s' }}>
+          <div className="msg-item" style={{ left: '37.7%', animationDelay: '-20.8s', animationDuration: '33.9s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>今天在银行排队一小时，VIP 插队太离谱了</span>
           </div>
-          <div className="msg-item" style={{ left: '45.0%', animationDelay: '-0.2s', animationDuration: '24.3s' }}>
+          <div className="msg-item" style={{ left: '45.0%', animationDelay: '-20.2s', animationDuration: '24.3s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>朝阳区新开的日式烧肉店，和牛入口即化</span>
           </div>
-          <div className="msg-item" style={{ left: '55.3%', animationDelay: '0.7s', animationDuration: '37.4s' }}>
+          <div className="msg-item" style={{ left: '55.3%', animationDelay: '-19.3s', animationDuration: '37.4s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>小米 SU7 实测续航达成率 92%，超出预期</span>
           </div>
-          <div className="msg-item" style={{ left: '7.4%', animationDelay: '2.0s', animationDuration: '24.3s' }}>
+          <div className="msg-item" style={{ left: '7.4%', animationDelay: '-18.0s', animationDuration: '24.3s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>吐槽一下：某互联网大厂又开始变相裁员了</span>
           </div>
-          <div className="msg-item" style={{ left: '22.3%', animationDelay: '3.4s', animationDuration: '36.3s' }}>
+          <div className="msg-item" style={{ left: '22.3%', animationDelay: '-16.6s', animationDuration: '36.3s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>故宫雪景美哭了，这才是北平的冬天</span>
           </div>
-          <div className="msg-item" style={{ left: '31.2%', animationDelay: '4.1s', animationDuration: '32.6s' }}>
+          <div className="msg-item" style={{ left: '31.2%', animationDelay: '-15.9s', animationDuration: '32.6s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>邻居家的猫会开门，我家猫只会拆家</span>
           </div>
-          <div className="msg-item" style={{ left: '50.3%', animationDelay: '5.4s', animationDuration: '28.2s' }}>
+          <div className="msg-item" style={{ left: '50.3%', animationDelay: '-14.6s', animationDuration: '28.2s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>三亚海鲜市场避雷指南，本地人教你挑</span>
           </div>
-          <div className="msg-item" style={{ left: '55.9%', animationDelay: '6.2s', animationDuration: '31.6s' }}>
+          <div className="msg-item" style={{ left: '55.9%', animationDelay: '-13.8s', animationDuration: '31.6s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>苹果 Vision Pro 销量惨淡，库克急了</span>
           </div>
-          <div className="msg-item" style={{ left: '7.0%', animationDelay: '6.6s', animationDuration: '34.1s' }}>
+          <div className="msg-item" style={{ left: '7.0%', animationDelay: '-13.4s', animationDuration: '34.1s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>周末去了一趟莫干山，民宿绝了</span>
           </div>
-          <div className="msg-item" style={{ left: '27.4%', animationDelay: '7.8s', animationDuration: '36.6s' }}>
+          <div className="msg-item" style={{ left: '27.4%', animationDelay: '-12.2s', animationDuration: '36.6s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>某品牌奶茶被曝使用过期原料，网友炸了</span>
           </div>
-          <div className="msg-item" style={{ left: '32.9%', animationDelay: '8.1s', animationDuration: '33.8s' }}>
+          <div className="msg-item" style={{ left: '32.9%', animationDelay: '-11.9s', animationDuration: '33.8s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>DeepSeek V4 发布，编程能力碾压 GPT</span>
           </div>
-          <div className="msg-item" style={{ left: '48.5%', animationDelay: '9.7s', animationDuration: '26.9s' }}>
+          <div className="msg-item" style={{ left: '48.5%', animationDelay: '-10.3s', animationDuration: '26.9s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>成都苍蝇馆子地图，不好吃你来打我</span>
           </div>
-          <div className="msg-item" style={{ left: '57.9%', animationDelay: '10.7s', animationDuration: '34.8s' }}>
+          <div className="msg-item" style={{ left: '57.9%', animationDelay: '-9.3s', animationDuration: '34.8s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>特斯拉 FSD 入华，国产智驾还扛得住吗</span>
           </div>
-          <div className="msg-item" style={{ left: '16.4%', animationDelay: '11.7s', animationDuration: '28.5s' }}>
+          <div className="msg-item" style={{ left: '16.4%', animationDelay: '-8.3s', animationDuration: '28.5s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>今天坐高铁遇到个话痨师傅，一路没停</span>
           </div>
-          <div className="msg-item" style={{ left: '28.6%', animationDelay: '12.0s', animationDuration: '30.1s' }}>
+          <div className="msg-item" style={{ left: '28.6%', animationDelay: '-8.0s', animationDuration: '30.1s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>大理洱海骑行攻略，风景比照片美十倍</span>
           </div>
-          <div className="msg-item" style={{ left: '38.2%', animationDelay: '13.2s', animationDuration: '30.8s' }}>
+          <div className="msg-item" style={{ left: '38.2%', animationDelay: '-6.8s', animationDuration: '30.8s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>老板画饼新高度：我们要做 AI 界的 Swisse</span>
           </div>
-          <div className="msg-item" style={{ left: '50.4%', animationDelay: '13.6s', animationDuration: '25.5s' }}>
+          <div className="msg-item" style={{ left: '50.4%', animationDelay: '-6.4s', animationDuration: '25.5s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>Switch 2 确认向下兼容，老玩家落泪</span>
           </div>
-          <div className="msg-item" style={{ left: '61.1%', animationDelay: '14.3s', animationDuration: '28.2s' }}>
+          <div className="msg-item" style={{ left: '61.1%', animationDelay: '-5.7s', animationDuration: '28.2s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>长沙夜市从头吃到尾，只花了 100 块</span>
           </div>
-          <div className="msg-item" style={{ left: '9.3%', animationDelay: '16.2s', animationDuration: '32.9s' }}>
+          <div className="msg-item" style={{ left: '9.3%', animationDelay: '-3.8s', animationDuration: '32.9s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>OpenAI 新模型被指套壳，AI 圈又吵起来了</span>
           </div>
-          <div className="msg-item" style={{ left: '23.5%', animationDelay: '16.9s', animationDuration: '35.5s' }}>
+          <div className="msg-item" style={{ left: '23.5%', animationDelay: '-3.1s', animationDuration: '35.5s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>北海涠洲岛避坑：别被黄牛宰了</span>
           </div>
-          <div className="msg-item" style={{ left: '31.1%', animationDelay: '18.0s', animationDuration: '35.7s' }}>
+          <div className="msg-item" style={{ left: '31.1%', animationDelay: '-2.0s', animationDuration: '35.7s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '12px' }}>发现一家宝藏咖啡馆，老板是前阿里 P8</span>
           </div>
-          <div className="msg-item" style={{ left: '48.3%', animationDelay: '18.5s', animationDuration: '29.5s' }}>
+          <div className="msg-item" style={{ left: '48.3%', animationDelay: '-1.5s', animationDuration: '29.5s' }}>
             <span className="msg-dot"></span>
             <span className="msg-text" style={{ fontSize: '11px' }}>B站 UP 主停更潮背后：用爱发电撑不住了</span>
           </div>
@@ -580,6 +580,11 @@ function LoginForm() {
           pointer-events: none;
           overflow: hidden;
           z-index: 1;
+          animation: waterfallFadeIn 2.8s ease-out both;
+        }
+        @keyframes waterfallFadeIn {
+          0% { opacity: 0; }
+          100% { opacity: 1; }
         }
         .msg-item {
           position: absolute;
