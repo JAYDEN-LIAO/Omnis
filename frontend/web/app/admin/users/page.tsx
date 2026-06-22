@@ -35,10 +35,9 @@ export default function AdminUsersPage() {
   const load = async (kw: string = keyword, p: number = page) => {
     setLoading(true);
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8008';
       const params = new URLSearchParams({ page: String(p), page_size: '20' });
       if (kw) params.set('keyword', kw);
-      const res = await fetch(`${apiBase}/api/admin/users?${params}`, {
+      const res = await fetch(`/api/admin/users?${params}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('mediaradar_token')}` },
       });
       const json = await res.json();
@@ -61,8 +60,7 @@ export default function AdminUsersPage() {
   const handleDeactivate = async (userId: string) => {
     if (!confirm('确定禁用该用户？')) return;
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8008';
-      const res = await fetch(`${apiBase}/api/admin/users/${userId}/deactivate`, {
+      const res = await fetch(`/api/admin/users/${userId}/deactivate`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('mediaradar_token')}` },
       });

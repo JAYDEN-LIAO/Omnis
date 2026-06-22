@@ -61,7 +61,7 @@ function LoginForm() {
   const handleGoogleLogin = async () => {
     setPending('google');
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8008';
+      const base = process.env.NEXT_PUBLIC_API_BASE || '';
       window.location.href = `${base}/api/auth/oauth/google/login?redirect=${encodeURIComponent(redirect)}`;
     } catch {
       toast.error('登录失败');

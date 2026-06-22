@@ -27,8 +27,7 @@ function CallbackInner() {
       }
       // 没传 role：先写默认 user，然后用 me 拉真实 role 覆盖
       writeCookies('user');
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8008';
-      fetch(`${apiBase}/api/auth/me`, {
+      fetch(`/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(r => r.json())

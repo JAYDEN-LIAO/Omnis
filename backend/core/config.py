@@ -127,7 +127,7 @@ class Settings:
     GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
     WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "").strip()
     WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "").strip()
-    OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "https://mediaradar.jaydennn.xyz").strip()
+    OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "https://omnis.jaydennn.xyz").strip()
 
     # ======== 日志配置 ========
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

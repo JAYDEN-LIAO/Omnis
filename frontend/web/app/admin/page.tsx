@@ -21,9 +21,8 @@ export default function AdminHomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8008';
     const token = getToken();
-    fetch(`${apiBase}/api/admin/stats`, {
+    fetch(`/api/admin/stats`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.json())
