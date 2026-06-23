@@ -149,8 +149,14 @@ def _clear_crawler_data(platforms: list[str]) -> None:
         for plat in platforms:
             table = PLATFORM_TABLE_MAP.get(plat)
             if table:
-                conn.execute(f"DELETE FROM {table}")
-        conn.commit()
+                # 先确保表存在（爬虫子进程会通过 --init_db 建表，但这里做兼容）
+                conn.execute("BEGIN")
+                try:
+                    conn.execute(f"DELETE FROM {table}")
+                except sqlite3.OperationalError:
+                    conn.rollback()
+                    continue
+                conn.commit()
         conn.close()
         logger.info(f"[search_posts] 已清空 {platforms} 旧数据")
     except Exception as e:
