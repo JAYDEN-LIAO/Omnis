@@ -392,9 +392,9 @@ ANALYST_PROMPT_WITH_EVOLUTION = """你是一位资深且敏锐的企业舆情风
 # v2.0 P2: 四维智能规划 Prompt
 # ============================================================
 
-PLAN_PROMPT = """你是一个任务规划专家。先分析用户意图和约束条件，再拆解执行步骤。
+PLAN_PROMPT = """你是一个任务规划专家。分析用户意图，必要时给出简短建议，但不强制执行顺序。
 
-当前可用的核心工具：
+当前可用工具：
 {tools}
 
 用户问题：{user_message}
@@ -403,35 +403,16 @@ PLAN_PROMPT = """你是一个任务规划专家。先分析用户意图和约束
 {{
   "goal": "一句话描述最终目标",
   "mode": "immediate",
-  "constraints": {{
-    "budget_max": "预算上限(数字，无则为null)",
-    "accessibility": "elderly_friendly|wheelchair|normal",
-    "exclude": ["排除项列表"],
-    "duration": "时间跨度(如'3天')",
-    "preferred_platforms": ["优先平台列表"],
-    "language": "zh|en"
-  }},
-  "steps": [
-    {{
-      "step": 1,
-      "description": "这一步要做什么",
-      "tool": "工具名",
-      "criticality": "critical|required|optional",
-      "why": "为什么需要这一步"
-    }}
-  ]
+  "constraints": {{}},
+  "steps": []
 }}
 
-规则：
-- 简单问题（直接回答即可）→ steps 为空数组，constraints 全部为 null/空
-- 复杂问题 → 拆为 2-5 步
-- 如果用户提到"定时""定期""每天早上"等，mode 改为 "scheduled"，增加 "schedule" 字段：
-  {{"cron": "cron表达式", "description": "触发时机描述"}}
-- criticality 标注原则：
-  critical = 数据采集步骤（后面步骤依赖其结果），失败时直接终止
-  required = 核心分析步骤，失败时重试 2 次后降级跳过
-  optional = 推送/格式化步骤，失败不影响主流程
-- 约束提取：从用户输入中抽取限制条件，无则填 null/空数组
+规则（非常重要）：
+- 绝大多数问题 → steps 为空数组。只有以下两类才需要填写 steps：
+  1. 定时调度（用户说要"每天早上""每周""定期"）→ mode=scheduled + 填 schedule
+  2. 明确的多步组合（用户同时要求搜索+过滤+分析+推送，缺一不可）→ 每步一个工具
+- 普通搜索/查询/订阅管理 → steps=[]，让后续执行循环根据实际数据自主决策
+- criticality：不填则默认为 required
 - 只输出 JSON，不要解释"""
 
 PLAN_ADJUST_PROMPT = """你是任务规划修正专家。原计划执行到某一步时结果异常，需要调整后续步骤。

@@ -271,3 +271,58 @@ from backend.core.logger import get_logger
 - `backend/services/radar_service/__init__.py`
 
 前提条件已满足，现在是动手的时机。
+
+---
+
+## P5. Plan Overfitting：Agent 重复执行已完成步骤
+
+### 问题现象
+
+用户说"搜微博关于 EDG 的六条帖子"，Agent 搜到了 6 条结果，但**又搜了一遍**。伴随三个症状：
+
+1. **Agent 重复搜索** — plan 规划的 2 个 step 都调了 `search_posts`，搜完 6 条满足要求后，轮次 2 又调了一次
+2. **计划修正失败** (`Expecting value: line 1 column 1`) — `_maybe_adjust_plan` 调 LLM 返回空，`json.loads("")` 抛异常
+3. **跳过 auto_template 累积** — `_maybe_save_template` 检测到 critical 步骤失败，拒绝保存模板
+
+### 根因
+
+**三层问题叠加：**
+
+#### 第一层：step_results 覆盖污染（代码 bug）
+
+原始 step 跟踪逻辑用 `break` 匹配第一个同名工具，两次 `search_posts` 调用都把结果写到同一个 `step_1`：
+
+```
+轮次1: search_posts → 匹配 step_1 → step_1 = {6条, success}
+轮次2: search_posts → 匹配 step_1 → step_1 = {0条, success=false}  ← 覆盖了轮次1
+```
+
+**修复：** `step_results` 已有值的 key 不再覆盖。只有**首次**写入才触发 plan adjustment。
+
+#### 第二层：进度提示的矛盾信息（prompt 设计缺陷）
+
+原进度提示同时告诉 LLM 两件事：
+- "还有 1 步计划" — 催促执行
+- "已完成目标可停止" — 建议停止
+
+LLM 优先服从 plan，选了继续执行。
+
+**修复：** 进度提示改为纯 goal-check："在决定下一步之前，先判断当前是否已满足用户的原始请求。如果是，直接回复用户，不要调任何工具。"
+
+#### 第三层：Plan 格式过于强制（架构哲学的偏差）
+
+原 `PLAN_PROMPT` 把几乎所有问题都引导到"拆为 2-5 步"，包括简单的搜索/查询。这造成了大量不必要的 plan 步骤，LLM 受 plan 约束执行了多余的轮次。
+
+**修复：** `PLAN_PROMPT` 改为"绝大多数问题 → steps 为空数组"。只有定时调度和明确的多步组合（搜+滤+析+推）才需要填 steps。让 ReAct 循环根据实际数据自主决策，而不是被 JSON 计划锁死。
+
+### 解决方案总结
+
+三个修改同时生效：
+
+| 文件 | 改动 |
+|------|------|
+| `agent_core.py` step 跟踪 | `key not in step_results` 防止覆盖 |
+| `agent_core.py` 进度提示 | goal-check 替代 plan 步数提示 |
+| `prompt_templates.py` PLAN_PROMPT | steps 默认为空，plan 降级为建议 |
+
+**核心思想：** Plan 是建议，不是命令。执行路径由 ReAct 循环的 Observed→Decide→Act 驱动，不预先锁定。

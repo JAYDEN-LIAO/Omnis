@@ -111,7 +111,7 @@ def clean_json_string(raw_text: str) -> str:
 def _call_llm_inner(prompt, text, response_format, engine, pydantic_model):
     """实际 LLM 调用逻辑（不含 timing 和 circuit breaker）"""
     active_client = kimi_client if engine == "kimi" else deepseek_client
-    active_model = settings.REVIEWER_MODEL if engine == "kimi" else settings.ANALYST_MODEL
+    active_model = settings.DEFAULT_MODEL
 
     kwargs = {
         "model": active_model,

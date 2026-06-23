@@ -629,12 +629,13 @@ def _detect_anomaly(result) -> str:
         return ""
     if result.get("error"):
         return f"工具返回错误: {str(result['error'])[:100]}"
-    data = (
-        result.get("posts")
-        or result.get("results")
-        or (result.get("data") or {}).get("posts")
-        or (result.get("data") or {}).get("results")
-    )
+    raw_data = result.get("data")
+    if isinstance(raw_data, dict):
+        data = raw_data.get("posts") or raw_data.get("results")
+    elif isinstance(raw_data, list):
+        data = raw_data
+    else:
+        data = result.get("posts") or result.get("results")
     if isinstance(data, list) and len(data) == 0:
         return "返回空数据，可能是过滤条件过严或数据源无匹配"
     return ""
@@ -680,6 +681,9 @@ async def _maybe_adjust_plan(step_result, step_idx: int, ctx: AgentContext) -> s
         adjusted = await loop.run_in_executor(
             None, _call_plan_adjust_llm_sync, adjust_prompt, ctx.owner_id,
         )
+        if not adjusted:
+            logger.warning("[Plan] LLM 返回空内容，跳过计划修正")
+            return ""
         new_steps_data = _json.loads(adjusted)
         ctx.plan["steps"] = ctx.plan["steps"][:step_idx] + new_steps_data["adjusted_steps"]
         ctx.plan["adjustment_note"] = new_steps_data.get("note", "")
@@ -954,14 +958,14 @@ async def chat_with_agent_stream(
 
                 # ── P3: 进度 hint 用临时变量，不入 current_messages ──
                 plan_hint = None
-                if ctx.plan and ctx.plan.get("steps") and i > 0:
+                if i > 0:
                     plan_hint = {
                         "role": "system",
                         "content": (
-                            f"[进度提示] 当前第 {i+1}/{ctx.max_iterations} 轮。"
-                            f"目标: {ctx.plan.get('goal', '')}。"
-                            f"已执行 {i} 步，还有 {len(ctx.plan['steps']) - i} 步计划。"
-                            f"如果已完成目标可回复总结，不需要继续调用工具。"
+                            f"[第 {i+1}/{ctx.max_iterations} 轮] "
+                            f"在决定下一步之前，先判断：当前是否已满足用户的原始请求？"
+                            f"如果是，直接回复用户，不要再调任何工具。"
+                            f"如果不是，再考虑调用哪个工具来补充信息。"
                         ),
                     }
                 messages_for_llm = list(ctx.current_messages)
@@ -1088,15 +1092,20 @@ async def chat_with_agent_stream(
 
                         # P2: 跟踪 plan step 结果 → 异常检测 → 动态调整
                         if ctx.plan and ctx.plan.get("steps"):
+                            step_results = ctx.plan.setdefault("step_results", {})
                             for step in ctx.plan["steps"]:
-                                if step.get("tool") == tool_name:
-                                    sid = step.get("step")
-                                    ctx.plan.setdefault("step_results", {})[f"step_{sid}"] = parsed
-                                    # 只在有 named steps 时触发调整
+                                if not isinstance(step, dict):
+                                    continue
+                                sid = step.get("step")
+                                key = f"step_{sid}"
+                                # 该 step 已有结果则不再覆盖（防止同工具名多次调用互相覆盖）
+                                if step.get("tool") == tool_name and key not in step_results:
+                                    step_results[key] = parsed
+                                    # 只在有 named step 且结果异常时触发调整
+                                    adjusted_chunk = await _maybe_adjust_plan(parsed, ctx.iteration, ctx)
+                                    if adjusted_chunk:
+                                        yield adjusted_chunk
                                     break
-                            adjusted_chunk = await _maybe_adjust_plan(parsed, i, ctx)
-                            if adjusted_chunk:
-                                yield adjusted_chunk
 
                     # Token 预算检查
                     try:

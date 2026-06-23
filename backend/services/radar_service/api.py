@@ -813,11 +813,10 @@ class LLMConfigUpdateRequest(BaseModel):
 
 
 LLM_AGENTS = {
-    "default":   {"label": "默认模型",      "role": "所有 Agent 的兜底配置，单独配置后优先级更高",  "default_model": "deepseek-chat"},
-    "analyst":   {"label": "分析员",        "role": "舆情风险分析",   "default_model": "deepseek-chat"},
-    "reviewer":  {"label": "复核员",        "role": "交叉复核判定",   "default_model": "deepseek-chat"},
-    "embedding": {"label": "向量引擎",      "role": "文本向量聚类",   "default_model": "BAAI/bge-m3"},
-    "vision":    {"label": "视觉引擎",      "role": "图片证据解析",   "default_model": "qwen-vl-max"},
+    "default":   {"label": "默认模型",  "role": "所有未单独配置的 AI 能力兜底",  "default_model": "deepseek-chat"},
+    "assistant": {"label": "AI 助手",  "role": "Agent 对话、规划与工具编排",   "default_model": "deepseek-chat"},
+    "embedding": {"label": "嵌入模型",  "role": "文本向量聚类与语义检索",        "default_model": "BAAI/bge-m3"},
+    "vision":    {"label": "视觉模型",  "role": "图片分析与 OCR 识别",          "default_model": "qwen-vl-max"},
 }
 
 
@@ -834,11 +833,11 @@ def get_llm_configs(current_user: dict = Depends(require_registered_user)):
         user_cfg = get_model_config(owner_id, role_upper) or {}
         eff = get_effective_config(owner_id, role_upper)
 
-        # 仅当前用户的 api_key 才回显（脱敏成 ****xxxx）
-        user_api_key = user_cfg.get("api_key", "") or ""
+        # 脱敏显示实际生效的 API 密钥（系统默认或用户自定义）
+        effective_api_key = eff.get("api_key", "") or ""
         api_key_masked = (
-            "****" + user_api_key[-4:] if user_api_key and len(user_api_key) >= 4
-            else ("***" if user_api_key else "")
+            "****" + effective_api_key[-4:] if effective_api_key and len(effective_api_key) >= 4
+            else ("***" if effective_api_key else "")
         )
 
         result[agent] = {
@@ -846,7 +845,7 @@ def get_llm_configs(current_user: dict = Depends(require_registered_user)):
             "role": info["role"],
             "default_model": info["default_model"],
             "api_key_masked": api_key_masked,
-            "has_key": bool(user_api_key),
+            "has_key": bool(effective_api_key),
             "base_url": user_cfg.get("base_url", ""),
             "model": user_cfg.get("model", ""),
             "effective_base_url": eff.get("base_url", ""),
@@ -894,17 +893,23 @@ def update_llm_config(agent: str, req: LLMConfigUpdateRequest, current_user: dic
 
 
 @router.post("/api/llm/test/{agent}")
-def test_llm_config(agent: str, current_user: dict = Depends(require_registered_user)):
-    """测试当前用户指定 Agent 的 API 连通性（v2.2 per-user）。"""
+def test_llm_config(
+    agent: str,
+    req: LLMConfigUpdateRequest = None,
+    current_user: dict = Depends(require_registered_user),
+):
+    """测试当前用户指定 Agent 的 API 连通性。
+    可选传入 api_key/base_url/model 覆盖当前配置测试。"""
     from backend.core.model_config_db import get_effective_config
 
     if agent not in LLM_AGENTS:
         return {"code": 400, "msg": f"无效 Agent：{agent}"}
 
+    # 优先用请求中传入的新值测试，未传则从生效配置读取
     eff = get_effective_config(current_user["id"], agent.upper())
-    api_key = eff.get("api_key") or ""
-    base_url = eff.get("base_url") or ""
-    model = eff.get("model") or ""
+    api_key = (req.api_key.strip() if req and req.api_key else "") or eff.get("api_key") or ""
+    base_url = (req.base_url.strip() if req and req.base_url else "") or eff.get("base_url") or ""
+    model = (req.model.strip() if req and req.model else "") or eff.get("model") or ""
 
     if not api_key or not base_url:
         return {"code": 400, "msg": "API Key 或 Base URL 未配置"}

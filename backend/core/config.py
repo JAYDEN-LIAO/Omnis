@@ -30,29 +30,14 @@ class Settings:
                   or "deepseek-chat")
     DEFAULT_MODEL = _def_model
 
-    # ======== 配置1: 分析员 Agent（回退: ANALYST → DEFAULT）========
-    _analyst_api_key = os.getenv("ANALYST_API_KEY", "") or _def_api_key
-    ANALYST_API_KEY = _analyst_api_key
-    _analyst_base_url = os.getenv("ANALYST_BASE_URL", "").strip() or _def_base_url
-    ANALYST_BASE_URL = _analyst_base_url
-    _analyst_model = os.getenv("ANALYST_MODEL", "").strip() or _def_model
-    ANALYST_MODEL = _analyst_model
-
-    # ======== 配置2: 复核员 Agent（回退: REVIEWER → DEFAULT）========
-    _reviewer_api_key = os.getenv("REVIEWER_API_KEY", "") or _def_api_key
-    REVIEWER_API_KEY = _reviewer_api_key
-    _reviewer_base_url = os.getenv("REVIEWER_BASE_URL", "").strip() or _def_base_url
-    REVIEWER_BASE_URL = _reviewer_base_url
-    _reviewer_model = os.getenv("REVIEWER_MODEL", "").strip() or _def_model
-    REVIEWER_MODEL = _reviewer_model
-
-    # ======== Agent 智能体（回退: AGENT → ANALYST → DEFAULT）========
-    _agent_api_key = os.getenv("AGENT_API_KEY", "").strip() or _analyst_api_key
-    AGENT_API_KEY = _agent_api_key
-    _agent_base_url = os.getenv("AGENT_BASE_URL", "").strip() or _analyst_base_url
-    AGENT_BASE_URL = _agent_base_url
-    _agent_model = os.getenv("AGENT_MODEL", "").strip() or _analyst_model
-    AGENT_MODEL = _agent_model
+    # ======== AI 助手模型（回退: ASSISTANT → DEFAULT）========
+    # 环境变量兼容 ASSISTANT_*（优先）和 AGENT_*（向后兼容）
+    _assistant_api_key = os.getenv("ASSISTANT_API_KEY", "").strip() or os.getenv("AGENT_API_KEY", "").strip() or _def_api_key
+    ASSISTANT_API_KEY = _assistant_api_key
+    _assistant_base_url = os.getenv("ASSISTANT_BASE_URL", "").strip() or os.getenv("AGENT_BASE_URL", "").strip() or _def_base_url
+    ASSISTANT_BASE_URL = _assistant_base_url
+    _assistant_model = os.getenv("ASSISTANT_MODEL", "").strip() or os.getenv("AGENT_MODEL", "").strip() or _def_model
+    ASSISTANT_MODEL = _assistant_model
 
     # ======== 配置3: 向量引擎（回退: EMBEDDING → DEFAULT）========
     _emb_api_key = os.getenv("EMBEDDING_API_KEY", "") or _def_api_key
@@ -130,6 +115,9 @@ class Settings:
     OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "https://omnis.jaydennn.xyz").strip()
     OAUTH_HTTPS_PROXY = os.getenv("OAUTH_HTTPS_PROXY", "").strip()
 
+    # ======== 爬虫 Cookie 配置 ========
+    WEIBO_COOKIE = os.getenv("WEIBO_COOKIE", "").strip()
+
     # ======== 日志配置 ========
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()  # text | json
@@ -186,10 +174,9 @@ from backend.core.agent_memory_db import init_db as _  # Agent 记忆库初始�
 # ── 多 Pipeline 模型解析 ──
 
 NODE_OVERRIDES = {
-    "risk/analyst": "ANALYST_MODEL",
-    "risk/reviewer": "REVIEWER_MODEL",
+    "risk/analyst": "DEFAULT_MODEL",
+    "risk/reviewer": "DEFAULT_MODEL",
     "risk/director": "DEFAULT_MODEL",
-    # 新线不需要节点覆盖，统一走 pipeline 级默认
 }
 
 
@@ -209,11 +196,9 @@ def update_llm_config(agent: str, config: dict) -> bool:
     _BAD_VALUES = {"test", "sk-test", "", "gpt-4"}
     prefix_map = {
         "default":   "DEFAULT",
-        "analyst":   "ANALYST",
-        "reviewer":  "REVIEWER",
+        "assistant": "ASSISTANT",
         "embedding": "EMBEDDING",
         "vision":    "VISION",
-        "agent":     "AGENT",
     }
     if agent not in prefix_map:
         return False
@@ -229,11 +214,9 @@ def update_llm_config(agent: str, config: dict) -> bool:
 
 def get_effective_llm_config(agent: str) -> dict:
     prefix_map = {
-        "analyst":   "ANALYST",
-        "reviewer":  "REVIEWER",
+        "assistant": "ASSISTANT",
         "embedding": "EMBEDDING",
         "vision":    "VISION",
-        "agent":     "AGENT",
     }
     prefix = prefix_map.get(agent)
     if not prefix:
@@ -252,9 +235,7 @@ def get_effective_llm_config(agent: str) -> dict:
 
 def get_agent_config() -> tuple[str, str, str]:
     def field(name: str) -> str:
-        v = getattr(settings, f"AGENT_{name.upper()}", "") or ""
-        if v: return v
-        v = getattr(settings, f"ANALYST_{name.upper()}", "") or ""
+        v = getattr(settings, f"ASSISTANT_{name.upper()}", "") or ""
         if v: return v
         return getattr(settings, f"DEFAULT_{name.upper()}", "") or ""
     return field("api_key"), field("base_url"), field("model")

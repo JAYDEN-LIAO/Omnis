@@ -117,13 +117,14 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            for i in $(seq 1 10); do
+            sleep 5
+            for i in $(seq 1 15); do
               sleep 2
               if curl -sf http://localhost:8010/health > /dev/null 2>&1; then
                 echo "✅ 服务健康检查通过"
                 exit 0
               fi
-              echo "⏳ 等待服务启动... ($i/10)"
+              echo "⏳ 等待服务启动... ($i/15)"
             done
             echo "❌ 健康检查失败，部署可能有问题"
             exit 1

@@ -106,6 +106,7 @@ export interface LLMConfigItem {
   label: string;
   role: string;
   default_model: string;
+  effective_base_url: string;
   effective_model: string;
   base_url: string;
   model: string;
@@ -252,6 +253,9 @@ export const llmApi = {
       body: JSON.stringify(config),
     }),
 
-  test: (agent: string) =>
-    request<{ msg: string }>(`/api/llm/test/${agent}`, { method: 'POST', body: '{}' }),
+  test: (agent: string, config?: { api_key?: string; base_url?: string; model?: string }) =>
+    request<{ code: number; msg: string }>(`/api/llm/test/${agent}`, {
+      method: 'POST',
+      body: JSON.stringify(config || {}),
+    }),
 };

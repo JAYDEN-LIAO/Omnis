@@ -140,6 +140,8 @@ new_web_design/
 
 # Project-specific: data directories
 /temp_image/
+backend/services/crawler_service/browser_data/
+backend/weibo_cookie.txt
 /browser_data/
 /data/
 

@@ -1,2 +1,3 @@
-2026/06/12-18:57:36.383 bbc4 Creating DB D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\Extension Rules since it was missing.
-2026/06/12-18:57:36.392 bbc4 Reusing MANIFEST D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\Extension Rules/MANIFEST-000001
+2026/06/22-20:06:56.549 a2a8 Reusing MANIFEST D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\cdp_wb_user_data_dir\Default\Extension Rules/MANIFEST-000001
+2026/06/22-20:06:56.549 a2a8 Recovering log #3
+2026/06/22-20:06:56.550 a2a8 Reusing old log D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\cdp_wb_user_data_dir\Default\Extension Rules/000003.log 

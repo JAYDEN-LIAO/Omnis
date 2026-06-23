@@ -164,11 +164,11 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
         # 优先 user 配置
         if user_cfg and user_cfg.get(name):
             return user_cfg[name]
-        # 回退到 admin 系统默认
-        if agent_role == "AGENT":
-            return getattr(settings, f"DEFAULT_{name.upper()}", "") or ""
-        if agent_role == "DEFAULT":
-            return getattr(settings, f"DEFAULT_{name.upper()}", "") or ""
+        # 回退到角色专属系统配置（如 ASSISTANT_MODEL / EMBEDDING_MODEL）
+        role_config = getattr(settings, f"{agent_role}_{name.upper()}", "") or ""
+        if role_config:
+            return role_config
+        # 最终兜底到 DEFAULT_MODEL
         return getattr(settings, f"DEFAULT_{name.upper()}", "") or ""
 
     return {

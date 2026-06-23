@@ -424,8 +424,7 @@
    LLM settings — role chips
    ═══════════════════════════════════════ */
 .role-default { background: oklch(0.95 0.04 280); color: #6d28d9; }
-.role-analyst { background: oklch(0.95 0.04 0); color: #be185d; }
-.role-reviewer { background: oklch(0.95 0.04 80); color: #b45309; }
+.role-assistant { background: oklch(0.95 0.04 200); color: #0369a1; }
 .role-vector { background: oklch(0.95 0.03 160); color: #047857; }
 .role-vision { background: oklch(0.95 0.04 280); color: #6d28d9; }
 

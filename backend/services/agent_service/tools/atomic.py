@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,7 +20,7 @@ from ._owner import with_owner
 logger = get_logger("agent.tools.atomic")
 
 # ───────────────────────────────────────────────────────────────
-# H1. search_posts — 触发 CrawlerManager 按需采集
+# H1. search_posts — 跨平台按需搜索
 # ───────────────────────────────────────────────────────────────
 @tool(
     name="search_posts",
@@ -43,58 +44,170 @@ logger = get_logger("agent.tools.atomic")
     group="atomic",
 )
 @with_owner
-def search_posts_tool(
+async def search_posts_tool(
     keyword: str, _owner_id: str,
     platforms: Optional[list] = None, limit: int = 20,
 ) -> str:
-    """按关键词+平台搜索帖子，返回原始帖子列表。"""
+    """按关键词+平台搜索帖子，启动爬虫子进程从各平台采集。"""
+    logger.info(f"[search_posts] 开始搜索: keyword={keyword}, platforms={platforms}, limit={limit}, owner={_owner_id[:8]}")
     if not keyword.strip():
         return ToolResult(success=False, error="关键词不能为空", error_type="validation").to_json()
     plats = platforms or ["wb", "xhs"]
-    try:
-        from backend.services.crawler_service.api.services.crawler_manager import CrawlerManager
-        mgr = CrawlerManager()
-        # 检查 CrawlerManager 状态
-        status = mgr.get_status() if hasattr(mgr, "get_status") else {}
-        if not status.get("running", True):
-            logger.warning("[search_posts] CrawlerManager 未运行，尝试启动...")
-            mgr.start_all()
-        # 检查各平台熔断
-        for p in plats:
-            cb = getattr(mgr, "circuit_breakers", {}).get(p)
-            if cb and getattr(cb, "state", "") == "OPEN":
-                return ToolResult(
-                    success=False,
-                    error=f"平台 {p} 当前熔断中，预计恢复时间未知，请稍后重试",
-                    error_type="circuit_open",
-                ).to_json()
-        # 按需采集
-        posts = mgr.collect(
-            keyword=keyword, platforms=plats, max_count=limit,
-        ) if hasattr(mgr, "collect") else []
-        if not posts:
-            return ToolResult(
-                success=True,
-                data=[],
-                ui={"type": "post_list", "data": []},
-            ).to_json()
-        result = []
-        for p in posts:
-            result.append({
-                "title": p.get("title", ""),
-                "content": p.get("content", "") or p.get("text", ""),
-                "platform": p.get("platform", ""),
-                "url": p.get("url", ""),
-                "time": str(p.get("created_at", "") or p.get("time", "")),
-            })
+
+    # 确保爬虫数据库存在
+    db_path = _ensure_crawler_db()
+    logger.info(f"[search_posts] DB 路径: {db_path}")
+    # 清空相关平台的旧数据，确保只等待本次爬虫的新结果
+    _clear_crawler_data(plats)
+    if not db_path:
+        cached = _read_cached_posts(keyword, plats, limit)
         return ToolResult(
-            success=True,
-            data=result[:limit],
-            ui={"type": "post_list", "data": result[:limit]},
+            success=True, data=cached,
+            ui={"type": "post_list", "data": cached},
+        ).to_json()
+
+    try:
+        from backend.services.search_lib.crawler_adapter import quick_crawl_stream
+        from backend.core.config import settings
+
+        cookie = settings.WEIBO_COOKIE
+        if not cookie:
+            # 读自动保存的 cookie 文件
+            cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "weibo_cookie.txt")
+            if os.path.isfile(cookie_path):
+                try:
+                    with open(cookie_path, "r", encoding="utf-8") as f:
+                        cookie = f.read().strip()
+                except Exception:
+                    pass
+        if cookie:
+            logger.info(f"[search_posts] 使用 cookie 登录")
+
+        collected = []
+        seen_urls: set = set()
+        TIMEOUT = 180
+
+        async def _collect():
+            """在独立协程中收集结果，支持 asyncio.wait_for 超时取消。"""
+            c = []
+            s: set = set()
+            async for chunk in quick_crawl_stream(
+                query=keyword, platforms=plats, max_per_platform=min(limit, 10), cookie_str=cookie,
+            ):
+                if chunk["type"] == "item":
+                    item = chunk["item"]
+                    url = item.get("url", "") or item.get("post_id", "")
+                    if url and url not in s:
+                        s.add(url)
+                        c.append({
+                            "title": item.get("title", ""),
+                            "content": item.get("content", ""),
+                            "platform": item.get("platform", ""),
+                            "url": url,
+                            "time": "",
+                        })
+                        if len(c) >= limit:
+                            break
+            return c
+
+        try:
+            collected = await asyncio.wait_for(_collect(), timeout=TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning(f"[search_posts] 爬虫超时 ({TIMEOUT}s)，返回已收集的结果")
+        except Exception as e:
+            logger.warning(f"[search_posts] 爬虫异常: {e}")
+
+        logger.info(f"[search_posts] 收集到 {len(collected)} 条结果")
+        if not collected:
+            cached = _read_cached_posts(keyword, plats, limit)
+            if cached:
+                logger.info(f"[search_posts] 从缓存读到 {len(cached)} 条")
+                return ToolResult(
+                    success=True, data=cached,
+                    ui={"type": "post_list", "data": cached},
+                ).to_json()
+
+        return ToolResult(
+            success=True, data=collected[:limit],
+            ui={"type": "post_list", "data": collected[:limit]},
         ).to_json()
     except Exception as e:
         logger.error(f"[search_posts] 异常: {e}", exc_info=True)
         return ToolResult(success=False, error=str(e), error_type="unknown").to_json()
+
+
+def _clear_crawler_data(platforms: list[str]) -> None:
+    """清空指定平台在爬虫数据库中的旧数据，确保新爬虫的结果不被干扰。"""
+    from backend.services.search_lib.crawler_adapter import PLATFORM_TABLE_MAP
+    from backend.core.config import settings
+    import sqlite3
+    db_path = settings.CRAWLER_DB_PATH
+    if not db_path or not os.path.isfile(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        for plat in platforms:
+            table = PLATFORM_TABLE_MAP.get(plat)
+            if table:
+                conn.execute(f"DELETE FROM {table}")
+        conn.commit()
+        conn.close()
+        logger.info(f"[search_posts] 已清空 {platforms} 旧数据")
+    except Exception as e:
+        logger.warning(f"[search_posts] 清空旧数据失败: {e}")
+
+
+def _ensure_crawler_db() -> str:
+    """确保爬虫数据库文件存在，初始化所有爬虫所需表结构。返回 DB 路径。"""
+    try:
+        from backend.core.config import settings
+        db_path = settings.CRAWLER_DB_PATH
+        if not db_path:
+            return ""
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        if not os.path.isfile(db_path):
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.close()
+            logger.info(f"[search_posts] 已创建爬虫数据库: {db_path}")
+        return db_path
+    except Exception as e:
+        logger.warning(f"[search_posts] 无法创建爬虫数据库: {e}")
+        return ""
+
+
+def _read_cached_posts(keyword: str, platforms: list[str], limit: int) -> list[dict]:
+    """从已有爬虫数据库读取缓存数据，避免重复启动爬虫。"""
+    try:
+        from backend.services.search_lib.crawler_adapter import _read_latest_posts
+        from backend.core.config import settings
+
+        db_path = settings.CRAWLER_DB_PATH
+        if not db_path or not os.path.exists(db_path):
+            return []
+
+        collected = []
+        seen_urls: set = set()
+        for plat in platforms:
+            posts = _read_latest_posts(plat, keyword, max_count=limit)
+            for p in posts:
+                url = p.get("url", "") or p.get("post_id", "")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    collected.append({
+                        "title": p.get("title", ""),
+                        "content": p.get("content", ""),
+                        "platform": p.get("platform", ""),
+                        "url": url,
+                        "time": "",
+                    })
+                    if len(collected) >= limit:
+                        return collected
+        return collected
+    except Exception:
+        return []
 
 
 # ───────────────────────────────────────────────────────────────

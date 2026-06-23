@@ -30,39 +30,58 @@ if sys.stderr and hasattr(sys.stderr, 'buffer'):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import asyncio
+import os
 from typing import Optional, Type
 
 import cmd_arg
 import config
 from database import db
 from base.base_crawler import AbstractCrawler
-from media_platform.bilibili import BilibiliCrawler
-from media_platform.douyin import DouYinCrawler
-from media_platform.kuaishou import KuaishouCrawler
-from media_platform.tieba import TieBaCrawler
-from media_platform.weibo import WeiboCrawler
-from media_platform.xhs import XiaoHongShuCrawler
-from media_platform.zhihu import ZhihuCrawler
-from tools.async_file_writer import AsyncFileWriter
 from var import crawler_type_var
 
 
 class CrawlerFactory:
-    CRAWLERS: dict[str, Type[AbstractCrawler]] = {
-        "xhs": XiaoHongShuCrawler,
-        "dy": DouYinCrawler,
-        "ks": KuaishouCrawler,
-        "bili": BilibiliCrawler,
-        "wb": WeiboCrawler,
-        "tieba": TieBaCrawler,
-        "zhihu": ZhihuCrawler,
+    """懒加载爬虫类，只 import 需要的平台，避免加载全部依赖。"""
+    _CRAWLER_MAP: dict[str, str] = {
+        "xhs": "media_platform.xhs",
+        "dy": "media_platform.douyin",
+        "ks": "media_platform.kuaishou",
+        "bili": "media_platform.bilibili",
+        "wb": "media_platform.weibo",
+        "tieba": "media_platform.tieba",
+        "zhihu": "media_platform.zhihu",
     }
+
+    @classmethod
+    def get_crawler(cls, platform: str) -> Type[AbstractCrawler]:
+        module_path = cls._CRAWLER_MAP.get(platform)
+        if not module_path:
+            raise ValueError(f"不支持的平台: {platform}")
+        # 动态 import，只有目标平台的依赖会被加载
+        import importlib
+        module = importlib.import_module(module_path)
+        if platform == "xhs":
+            return module.XiaoHongShuCrawler
+        elif platform == "dy":
+            return module.DouYinCrawler
+        elif platform == "ks":
+            return module.KuaishouCrawler
+        elif platform == "bili":
+            return module.BilibiliCrawler
+        elif platform == "wb":
+            return module.WeiboCrawler
+        elif platform == "tieba":
+            return module.TieBaCrawler
+        elif platform == "zhihu":
+            return module.ZhihuCrawler
+        raise ValueError(f"平台 {platform} 没有对应的爬虫类")
 
     @staticmethod
     def create_crawler(platform: str) -> AbstractCrawler:
-        crawler_class = CrawlerFactory.CRAWLERS.get(platform)
-        if not crawler_class:
-            supported = ", ".join(sorted(CrawlerFactory.CRAWLERS))
+        try:
+            crawler_class = CrawlerFactory.get_crawler(platform)
+        except ValueError:
+            supported = ", ".join(sorted(CrawlerFactory._CRAWLER_MAP))
             raise ValueError(f"Invalid media platform: {platform!r}. Supported: {supported}")
         return crawler_class()
 
@@ -100,11 +119,16 @@ async def _generate_wordcloud_if_needed() -> None:
 async def main() -> None:
     global crawler
 
+    # 从环境变量读取 cookie（用于无头模式自动登录）
+    cookie_from_env = os.environ.get("WEIBO_COOKIE_STR", "").strip()
+    if cookie_from_env:
+        config.COOKIES = cookie_from_env
+        config.LOGIN_TYPE = "cookie"
+
     args = await cmd_arg.parse_cmd()
     if args.init_db:
         await db.init_db(args.init_db)
         print(f"Database {args.init_db} initialized successfully.")
-        return
 
     crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
     await crawler.start()

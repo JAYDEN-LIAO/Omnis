@@ -51,6 +51,19 @@ from .help import filter_search_result_card
 from .login import WeiboLogin
 
 
+def _save_weibo_cookie(cookie_str: str) -> None:
+    """保存微博 cookie 到项目根目录，供无头模式复用"""
+    if not cookie_str:
+        return
+    try:
+        target = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))), "weibo_cookie.txt")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(cookie_str)
+        utils.logger.info(f"[WeiboCrawler] 已保存 cookie 到 {target}")
+    except Exception as e:
+        utils.logger.warning(f"[WeiboCrawler] 保存 cookie 失败: {e}")
+
+
 class WeiboCrawler(AbstractCrawler):
     context_page: Page
     wb_client: WeiboClient
@@ -99,7 +112,8 @@ class WeiboCrawler(AbstractCrawler):
 
             # Create a client to interact with the xiaohongshu website.
             self.wb_client = await self.create_weibo_client(httpx_proxy_format)
-            if not await self.wb_client.pong():
+            # cookie 登录时 pong 必然失败（cookie 尚未注入浏览器），直接走登录流程
+            if config.LOGIN_TYPE == "cookie" or not await self.wb_client.pong():
                 login_obj = WeiboLogin(
                     login_type=config.LOGIN_TYPE,
                     login_phone="",  # your phone number
@@ -118,6 +132,9 @@ class WeiboCrawler(AbstractCrawler):
                         browser_context=self.browser_context,
                         urls=[self.mobile_index_url]
                     )
+                    # 保存登录后的有效 cookie 供无头模式复用
+                    cookie_str, _ = utils.convert_cookies(await self.browser_context.cookies(urls=[self.mobile_index_url]))
+                    _save_weibo_cookie(cookie_str)
                 except Exception as e:
                     utils.logger.warning(f"[WeiboCrawler.start] login failed, continuing without login: {e}")
 
@@ -340,7 +357,10 @@ class WeiboCrawler(AbstractCrawler):
     async def create_weibo_client(self, httpx_proxy: Optional[str]) -> WeiboClient:
         """Create xhs client"""
         utils.logger.info("[WeiboCrawler.create_weibo_client] Begin create weibo API client ...")
-        cookie_str, cookie_dict = utils.convert_cookies(await self.browser_context.cookies(urls=[self.mobile_index_url]))
+        cookies_for_mobile = await self.browser_context.cookies(urls=[self.mobile_index_url])
+        cookie_str, cookie_dict = utils.convert_cookies(cookies_for_mobile)
+        # 保存 cookie 到文件，供无头模式复用
+        _save_weibo_cookie(cookie_str)
         weibo_client_obj = WeiboClient(
             proxy=httpx_proxy,
             headers={

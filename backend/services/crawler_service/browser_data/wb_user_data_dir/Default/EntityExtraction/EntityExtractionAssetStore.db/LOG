@@ -1,3 +1,2 @@
-2026/06/13-22:16:48.683 d9a4 Reusing MANIFEST D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\EntityExtractionAssetStore.db/MANIFEST-000001
-2026/06/13-22:16:48.692 d9a4 Recovering log #3
-2026/06/13-22:16:48.695 d9a4 Reusing old log D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\wb_user_data_dir\Default\EntityExtractionAssetStore.db/000003.log 
+2026/06/22-20:05:35.871 af98 Creating DB D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\cdp_wb_user_data_dir\Default\EntityExtractionAssetStore.db since it was missing.
+2026/06/22-20:05:35.886 af98 Reusing MANIFEST D:\JAYDEN\develop\work\MediaRadar\backend\services\crawler_service\browser_data\cdp_wb_user_data_dir\Default\EntityExtractionAssetStore.db/MANIFEST-000001

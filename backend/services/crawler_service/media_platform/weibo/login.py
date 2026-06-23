@@ -66,6 +66,23 @@ class WeiboLogin(AbstractLogin):
                 "[WeiboLogin.begin] Invalid Login Type Currently only supported qrcode or phone or cookie ...")
 
 
+    async def login_by_cookies(self):
+        """通过 cookie 字符串登录，将 cookie 注入浏览器上下文"""
+        if not self.cookie_str:
+            utils.logger.error("[WeiboLogin.login_by_cookies] cookie 为空")
+            return
+        utils.logger.info("[WeiboLogin.login_by_cookies] 开始通过 cookie 登录...")
+        cookie_dict = utils.convert_str_cookie_to_dict(self.cookie_str)
+        if not cookie_dict:
+            utils.logger.warning("[WeiboLogin.login_by_cookies] 未解析出有效 cookie")
+            return
+        cookies = [
+            {"name": key, "value": val, "domain": ".weibo.cn", "path": "/"}
+            for key, val in cookie_dict.items()
+        ]
+        await self.browser_context.add_cookies(cookies)
+        utils.logger.info(f"[WeiboLogin.login_by_cookies] 已注入 {len(cookies)} 条 cookie")
+
     @retry(stop=stop_after_attempt(600), wait=wait_fixed(1), retry=retry_if_result(lambda value: value is False))
     async def check_login_state(self, no_logged_in_session: str) -> bool:
         """
@@ -121,12 +138,3 @@ class WeiboLogin(AbstractLogin):
     async def login_by_mobile(self):
         pass
 
-    async def login_by_cookies(self):
-        utils.logger.info("[WeiboLogin.login_by_qrcode] Begin login weibo by cookie ...")
-        for key, value in utils.convert_str_cookie_to_dict(self.cookie_str).items():
-            await self.browser_context.add_cookies([{
-                'name': key,
-                'value': value,
-                'domain': ".weibo.cn",
-                'path': "/"
-            }])
