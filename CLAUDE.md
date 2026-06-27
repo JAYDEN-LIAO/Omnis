@@ -16,7 +16,8 @@
   - 认证: NextAuth 5 (beta) + @auth/core（OAuth）
   - Mock: MSW 2 / 通知: sonner / 主题: next-themes / 图标: lucide-react / 命令面板: cmdk
 - **小程序前端**: uni-app (Vue 3) — 旧版形态保留
-- **AI**: DeepSeek（分析）、Kimi/Moonshot（复核）、Qwen-VL（视觉）、BGE-M3（聚类）
+- **AI**: DeepSeek（分析 + guide/celebrity/briefing 子图）、Kimi/Moonshot（risk 线 reviewer+direction 复核）、Qwen-VL（视觉）、BGE-M3（聚类）
+- **Admin 监控**: Prometheus 指标 + AgentOpsEngine（LLM 运维健康巡检）
 
 ## 目录结构
 
@@ -42,43 +43,59 @@ backend/
 │   ├── security_middleware.py # 安全头 + 请求体大小限制
 │   └── rate_limiter.py       # 请求限流（未认证非 auth 路径跳过）
 ├── services/
-│   ├── radar_service/        # 舆情分析核心（重点）
-│   │   ├── main.py           # 雷达调度入口（调用 Pipeline）
-│   │   ├── pipeline.py       # Pipeline 调度器
-│   │   ├── llm_gateway.py    # LangGraph 分析子图 + LLM 调用（含熔断器）
-│   │   ├── prompt_templates.py
+│   ├── radar_service/        # 数据采集与分析（调度器 + 原子组件 + 预警推送）
+│   │   ├── main.py           # 调度入口（旧 job/run_analysis_pipeline，仍供 risk 线使用）
+│   │   ├── pipeline.py       # [库] ScreenerStage/ClusterStage/VisionStage 阶段组件，被原子工具引用
+│   │   ├── pipeline_configs.py # 管线配置（旧注册表，保留向后兼容）
+│   │   ├── analysis_graph.py           # 风险线：LangGraph（analyst→reviewer→director）
+│   │   ├── analysis_graph_guide.py     # 攻略线：LangGraph（extractor→comparer→summarizer）
+│   │   ├── analysis_graph_celebrity.py # 追星线：LangGraph（sentiment→heat→aggregator）
+│   │   ├── analysis_graph_briefing.py  # 简报线：LangGraph（categorizer→highlighter→writer）
+│   │   ├── llm_gateway.py    # LLM 调用统一网关（call_llm）
+│   │   ├── prompt_templates.py # Screener + 各线分析 Prompt
+│   │   ├── schemas.py        # Pydantic 数据契约（各线 ScreenerResult + Analyst/ReviewerResult）
+│   │   ├── vision_agent.py   # Qwen-VL-Max 视觉模型调用
+│   │   ├── embed_cluster.py  # HDBSCAN 向量聚类
+│   │   ├── topic_tracker.py  # 话题演化追踪 + Qdrant 向量检索
+│   │   ├── topic_aggregator.py # 聚合 Topic 写入 SQLite
+│   │   ├── vector_store.py   # Qdrant 向量存储操作
 │   │   ├── api.py            # /api/radar_status, /api/start_task 等
 │   │   ├── db_manager.py     # SQLite 操作
-│   │   ├── scheduler.py      # APScheduler 定时调度器（扫描 + 每日简报）
-│   │   ├── push_generator.py # 邮件内容生成（批量预警模板 + 预警模板 + 每日简报模板）
+│   │   ├── scheduler.py      # APScheduler 定时调度器
+│   │   ├── push_generator.py # 邮件内容生成
 │   │   └── notifier/          # 预警推送（包）
-│   │       ├── __init__.py   # send_alert(), send_batch_alert(), reload_registry(), test_channel()
+│   │       ├── __init__.py   # send_alert(), send_batch_alert()
 │   │       ├── base.py       # NotifierBase 抽象类
-│   │       ├── registry.py   # NotifierRegistry 调度器
-│   │       ├── models.py     # AlertPayload, PushChannel, EmailConfig 等
-│   │       ├── channel_email.py
-│   │       ├── channel_wecom.py
-│   │       ├── channel_feishu.py
-│   │       └── channel_rss.py   # RSS 2.0 XML 生成（拉取模式）
-│   ├── agent_service/        # AI 助手对话（重点）
-│   │   ├── agent_core.py     # 流式对话引擎，Function Calling（26 工具）
+│   │       ├── registry.py   # NotifierRegistry
+│   │       ├── models.py     # AlertPayload, PushChannel
+│   │       ├── channel_email.py / wecom.py / feishu.py / rss.py
+│   ├── agent_service/        # AI 助手（重点 — 流式对话 + Function Calling + 适配器架构）
+│   │   ├── agent_core.py     # 流式对话引擎，AgentContext 统一状态
 │   │   ├── sse.py            # SSE 事件工厂
 │   │   ├── workflows_db.py   # v2.0 统一工作流存储（preset + auto_template + user）
+│   │   ├── adapters/         # 工具适配器层（路由到不同后端）
+│   │   │   ├── base.py       # AbstractToolAdapter 抽象类
+│   │   │   ├── direct_adapter.py # 直接调用 Python 函数
+│   │   │   └── mcp_adapter.py    # HTTP transport 调用 FastMCP Server
 │   │   ├── tools/            # 工具集（按组分文件）
-│   │   │   ├── atomic.py         # v2.0 H 组 12+ 原子工具
-│   │   │   ├── composite.py      # v2.0 I 组 组合工具动态注册
-│   │   │   ├── sentiment_dict.py # v2.0 领域情感词典
-│   │   │   ├── subscription.py  # A 组：订阅管理 + parse_intent
-│   │   │   ├── scan.py          # B 组：扫描/调度
-│   │   │   ├── query.py         # C 组：数据查询 + web_search
-│   │   │   ├── push.py          # D 组：推送通道管理
-│   │   │   ├── model.py         # E 组：模型管理
-│   │   │   └── system.py        # G 组：系统状态
+│   │   │   ├── _base.py      # @tool 装饰器 + ToolResult
+│   │   │   ├── _owner.py     # @with_owner 强制注入 owner_id
+│   │   │   ├── _constants.py # 常量定义
+│   │   │   ├── atomic.py     # H 组：12+ 原子工具（search_posts, filter_content 等）
+│   │   │   ├── composite.py  # I 组：组合工具动态注册
+│   │   │   ├── subscription.py / scan.py / query.py / push.py / model.py / system.py
+│   │   │   ├── search.py / guide.py / celebrity.py / briefing.py  # 各线专用工具
+│   │   │   └── sentiment_dict.py # 领域情感词典
+│   │   ├── reflection/       # 置信度评估 + 补充探查
+│   │   ├── diagnosis/        # 错误分类 + 熔断恢复
 │   │   └── memory/           # 记忆管理（jieba 分词 + TTL 缓存）
-│   ├── subscription_service/ # 订阅/配额/Admin API（v2.2）
-│   │   └── api.py
-│   ├── search_lib/           # 搜索库（从 search_service 重命名）
-│   └── crawler_service/       # 爬虫子模块（独立完整，暂不深入）
+│   ├── admin_service/        # Admin 监控（v2.2 新增）
+│   │   ├── agent_monitor.py  # AgentMonitorService（Prometheus 聚合）
+│   │   ├── agent_ops.py      # AgentOpsEngine（LLM 运维分析）
+│   │   └── api.py            # Admin API + WebSocket
+│   ├── subscription_service/ # 订阅/配额/Admin API
+│   ├── search_lib/           # 搜索库（search_service 重命名）
+│   └── crawler_service/      # 爬虫子模块（独立完整，暂不深入）
 frontend/
 ├── web/                          # Next.js 15 Web 端（主推形态）
 │   ├── app/
@@ -87,6 +104,7 @@ frontend/
 │   │   │   ├── agent/            # AI 助手
 │   │   │   ├── yq-list/          # 舆情列表
 │   │   │   └── settings/         # 设置：account / llm / push / system
+│   │   ├── admin/                # Admin 管理路由（独立布局）
 │   │   ├── (auth)/login/         # 登录页
 │   │   ├── api/auth/[...nextauth]/  # NextAuth 路由
 │   │   └── auth/callback/        # OAuth 回调
@@ -94,6 +112,7 @@ frontend/
 │   │   ├── layout/               # sidebar / topbar / page-header
 │   │   ├── ui/                   # shadcn 组件
 │   │   ├── charts/               # 图表封装
+│   │   ├── chat/                 # 对话组件
 │   │   └── animated-number.tsx
 │   ├── hooks/   lib/   stores/   types/
 │   └── public/
@@ -110,30 +129,90 @@ frontend/
     └── src/utils/api.js          # API 调用封装（含 push / llm 相关）
 ```
 
-## 核心架构：Pipeline 调度器 + LangGraph 分析子图
+## 核心架构：Agent + Tools + Workflows
+
+旧 Pipeline（`RadarPipeline` → `ScreenerStage` → `ClusterStage` → `LangGraph`）已被**拆解为原子工具 + 组合工作流**，由 Agent Function Calling 动态编排，而非硬编码管线。
 
 ```
-RadarPipeline (Pipeline 调度器)
-  ① ScreenerStage ──► ② VisionStage(条件) ──► ③ ClusterStage(asyncio 并行)
-                                                             │
-                                                             ▼
-                                           LangGraph 分析子图
-                                           analyst → reviewer → director
-                                                             │
-                                                             ▼
-                                                        ④ AlertStage
+用户 → Agent 流式对话 (agent_core.py)
+         │
+         ├── DirectAdapter → 从 _REGISTRY 直调 Python 函数
+         │     ├── A~G 组工具 (subscription/scan/query/push/model/search/system)
+         │     ├── H 组原子工具 (atomic.py, 12+ 个)
+         │     │   ├── search_posts → crawler_adapter → 爬虫子进程
+         │     │   ├── filter_content → ScreenerStage
+         │     │   ├── cluster_related → ClusterStage
+         │     │   └── extract_slots / compare_opinions / analyze_sentiment / ...
+         │     └── I 组组合工具 (composite.py, 动态注册)
+         │         └── execute_workflow_steps() 链式执行
+         │
+         └── MCPAdapter → HTTP transport 调 FastMCP Server（可选）
 ```
 
-### 组件职责
+### 工作流系统（workflows_db.py）
 
-| 组件 | 类型 | 职责 |
+单表 `workflows` 三源合一，`execute_workflow_steps()` 统一执行：
+
+| 来源 | 说明 | 例子 |
 |------|------|------|
-| ScreenerStage | Pipeline Stage | 文本初筛，Early Exit + Vision 条件调用 |
-| VisionStage | Pipeline Stage | Qwen-VL-Max 图片证据解析，含 retry |
-| ClusterStage | Pipeline Stage | HDBSCAN 向量聚类，asyncio 并行 n clusters |
-| Analyst Node | LangGraph Node | 风险等级判定 |
-| Reviewer Node | LangGraph Node | 交叉复核，确认/驳回 |
-| Director Node | LangGraph Node | 生成预警简报 |
+| `preset` | 预置组合工具，启动时注册为 FC 工具 | `deep_analyze_topic`, `scan_and_alert`, `quick_guide`, `briefing_digest` |
+| `auto_template` | 用户对话自动累积的模板 | 命中时 `hit_count++` |
+| `user` | 用户自定义 cron 定时任务 | 调度器每分钟轮询到期执行 |
+
+### 原子工具（atomic.py H 组，12+ 个）
+
+| 工具 | 对应旧阶段 | 说明 |
+|------|-----------|------|
+| `search_posts` | 爬虫采集 | 调 `quick_crawl_stream()` 启动爬虫子进程 |
+| `filter_content` | ScreenerStage | 封装 `ScreenerStage`，4 种 intent (risk/guide/celebrity/briefing) |
+| `cluster_related` | ClusterStage | 封装 `ClusterStage`，HDBSCAN 聚类 |
+| `extract_slots` | 分析 | 规则提取结构化槽位（时间/地点/花费） |
+| `compare_opinions` | 分析 | 跨平台加权观点对比 |
+| `generate_itinerary` | 结果 | 行程计划生成 |
+| `analyze_sentiment` | 分析 | 规则词典 + LLM 混合情感判定 |
+| `calc_velocity` | 分析 | 时间序列情感速度变化 |
+| `compare_platforms` | 分析 | 跨平台叙事对比 |
+| `query_report` | 查询 | 查询已生成的报告 |
+| `push_report` | 推送 | 通过指定通道推送 |
+| `list_workflows` | 管理 | 列出工作流 |
+| `manage_workflow` | 管理 | 启用/停用/删除/立即执行/另存 |
+
+### AI 助手（Agent Service）
+
+```
+AgentContext (session_id/owner_id/messages/iteration)
+         │
+    phase_build_context → 注入 system prompt + 长期记忆
+         │
+    [循环] phase_plan → phase_act → phase_observe
+         │                          │
+        LLM 调用                   ToolExecutor.execute()
+         │                          ├── DirectAdapter.supports() 优先
+         │                          └── 失败 → MCPAdapter 回退
+         │
+    TokenBudgetManager → 超预算自动压缩历史
+
+```
+
+### 调度流程（scheduler.py）
+
+```
+调度器启动 (scheduler_start → BackgroundScheduler)
+    │
+    ├── _run_scan() (按 IntervalTrigger 定时触发)
+    │       ↓
+    │   收集所有用户订阅 → 逐用户执行：
+    │     ├── risk 类型 → job_async(owner_id) → 旧 pipeline（爬虫 + RadarPipeline）
+    │     └── 其他类型 → _run_extra_pipelines_composite() → 调组合工具
+    │
+    ├── _run_user_workflows() (每分钟) → 检查用户 cron 工作流到期
+    │
+    └── _run_daily_summary() (按 push_time 触发) → 每日简报邮件
+```
+
+### 旧 Pipeline.py 现状
+
+`pipeline.py` 中的 `ScreenerStage`、`ClusterStage`、`VisionStage` 等类仍被原子工具作为**库**引用（`filter_content` 导入 `ScreenerStage`，`cluster_related` 导入 `ClusterStage`）。`RadarPipeline` 编排器仅在 risk 线的 `job_async()` 旧路径中使用。详见开发注意事项 #5。
 
 ## 关键 API
 
@@ -202,6 +281,18 @@ RadarPipeline (Pipeline 调度器)
 | `/api/agent/memory` | GET | 记忆列表 |
 | `/api/agent/memory/{session_id}` | GET/DELETE | 记忆详情/删除 |
 
+### Admin 监控（admin_service）
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/api/admin/agents/overview` | GET | Agent 概览（工具调用/错误率/会话数） |
+| `/api/admin/agents/tools` | GET | 工具健康明细 |
+| `/api/admin/agents/sessions` | GET | 会话统计数据 |
+| `/api/admin/agents/diagnosis` | GET | 诊断事件日志 |
+| `/api/admin/agents/memory` | GET | 记忆库统计 |
+| `/api/admin/agents/report` | GET | 健康巡检报告（LLM 分析+告警+建议） |
+| `/api/admin/agents/report/daily` | GET | 每日运维日报（LLM 生成） |
+| `/api/admin/agents/chat` | POST | 自然语言查询 Agent 状态 |
+
 ### 订阅管理（subscription_service）
 | 端点 | 方法 | 描述 |
 |------|------|------|
@@ -218,14 +309,34 @@ RadarPipeline (Pipeline 调度器)
 
 ## AI 助手（Agent Service）
 
-AI 助手通过 Function Calling 拥有 26 个工具，分 7 组，v2.0 新增 12+ 原子工具（H 组）+ 4 个组合工具（I 组）：
-- **A 组（订阅管理）**: list_subscriptions / add_subscription / update_subscription / remove_subscription / parse_intent
-- **B 组（扫描/调度）**: trigger_scan / pause_scan / resume_scan / get_schedule / set_schedule / get_crawl_status
-- **C 组（数据查询）**: search_alerts / get_topic_detail / web_search
-- **D 组（推送管理）**: list_push_channels / toggle_channel / configure_channel / test_channel
-- **E 组（模型管理）**: list_models / switch_model / test_model
-- **F 组（系统工具）**: 预留
-- **G 组（系统状态）**: get_system_status
+### 架构：适配器模式 + Function Calling
+
+```
+agent_core.py (AgentContext 流式主循环)
+  ├── phase_build_context → 注入 system prompt + 长期记忆
+  ├── phase_plan → LLM 规划
+  ├── phase_act → ToolExecutor.execute()
+  │     ├── DirectAdapter → 从 _REGISTRY 直调 Python 函数（优先）
+  │     └── MCPAdapter → HTTP transport 调 FastMCP Server（回退）
+  └── phase_observe → 观察结果
+```
+
+工具通过 `@tool()` 装饰器注册到全局 `_REGISTRY`，通过 `@with_owner` 强制注入 `owner_id`。
+启动时 `register_composite_tools()` 从 workflows 表读取 `is_composite_tool=1` 的 preset 条目，动态注册为 FC 工具。
+
+### 工具分组
+
+| 组 | 文件 | 用途 |
+|----|------|------|
+| A 组 | subscription.py | 订阅管理（list/add/update/remove/parse_intent） |
+| B 组 | scan.py | 扫描/调度（trigger_scan/get_scan_status/set_scan_interval/pause/resume） |
+| C 组 | query.py | 数据查询（search_alerts/get_topic_detail/web_search） |
+| D 组 | push.py | 推送管理（list/toggle/configure/test_channel） |
+| E 组 | model.py | 模型管理（list/switch/test_model） |
+| F 组 | system.py | 系统状态（get_system_status） |
+| H 组 | atomic.py | 12+ 原子工具（search_posts/filter_content/cluster_related/extract_slots/compare_opinions/analyze_sentiment/calc_velocity/compare_platforms/query_report/push_report/list_workflows/manage_workflow 等） |
+| I 组 | composite.py | 组合工具动态注册（deep_analyze_topic/scan_and_alert/quick_guide/briefing_digest） |
+| 线查询 | guide.py / celebrity.py / briefing.py / search.py | 各线报告查询工具 |
 
 对话风格：公关总监口吻，专业简洁。
 
@@ -237,6 +348,7 @@ AI 助手通过 Function Calling 拥有 26 个工具，分 7 组，v2.0 新增 1
 - **AI 助手** (`/agent`): 与 Agent 流式对话
 - **舆情列表** (`/yq-list`): TanStack Table + Virtual 虚拟滚动
 - **设置中心** (`/settings/{account|llm|push|system}`): 账号 / 模型 / 推送通道 / 系统配置
+- **Admin 管理** (`/admin`): Agent 监控仪表盘 + 运维报表
 
 ### 小程序端（uni-app，旧版保留）
 - **首页** (`/pages/index/index`): 仪表盘，展示今日舆情统计、AI 摘要、启动扫描按钮
@@ -250,13 +362,13 @@ AI 助手通过 Function Calling 拥有 26 个工具，分 7 组，v2.0 新增 1
 
 支持每个 Agent 角色单独配置模型，未配置时自动回退到**默认模型**：
 
-| 角色 | 用途 |
-|------|------|
-| 默认模型 | 所有 Agent 的兜底配置 |
-| 分析员 | 舆情风险分析 |
-| 复核员 | 交叉复核判定 |
-| 向量引擎 | 文本向量聚类 |
-| 视觉引擎 | 图片证据解析 |
+| 角色 | 用途 | 属于 |
+|------|------|------|
+| 默认模型 | 所有 Agent 的兜底配置 | 全局 |
+| 分析员 | 舆情风险分析（analyst node） | risk 线 |
+| 复核员 | 交叉复核判定（reviewer node） | risk 线 |
+| 向量引擎 | 文本向量聚类 | ClusterStage |
+| 视觉引擎 | 图片证据解析 | VisionStage |
 
 ## 可用 Skills
 
@@ -274,11 +386,11 @@ AI 助手通过 Function Calling 拥有 26 个工具，分 7 组，v2.0 新增 1
    - API 契约见 `docs/API_CONTRACT.md`，开发期可用 MSW mock
 3. **环境变量**: 项目根目录 `.env`，Web 端 `frontend/web/.env`，Qdrant 配置在 `Settings` 类中有默认值
 4. **爬虫目录**: `backend/services/crawler_service/` 启动命令 `python main.py`
-5. **Pipeline**: `pipeline.py` 包含 RadarPipeline 调度器，`run_analysis_pipeline()` 是 asyncio 入口
-6. **LangGraph**: 状态机定义在 `llm_gateway.py`，`radar_app` 仅封装 analyst→reviewer→director 子图
+5. **pipeline.py（库文件）**: `ScreenerStage`、`ClusterStage`、`VisionStage` 等阶段组件仍被原子工具作为库引用（如 `filter_content` 导入 `ScreenerStage`，`cluster_related` 导入 `ClusterStage`）。`RadarPipeline` 编排器仅在 risk 线的 `job_async()` 旧路径中使用。**新代码应调用原子工具/组合工具，而非直接实例化 `RadarPipeline`。**
+6. **LangGraph**: 4 个分析子图仍在 `analysis_graph.py`（risk, analyst→reviewer→director, DeepSeek+Kimi）、`analysis_graph_guide.py`（extractor→comparer→summarizer）、`analysis_graph_celebrity.py`（sentiment→heat→aggregator）、`analysis_graph_briefing.py`（categorizer→highlighter→writer）中。risk 线由 `job_async()` 触发，其他线通过组合工具的 `analysis_callable` 注入调用。
 7. **轮询间隔**: 前端首页 3 秒轮询一次后端状态
-8. **推送通道**: 企业微信/飞书/邮箱/RSS，`notifier/` 包使用相对导入，通过 `send_alert()` / `send_batch_alert()` 触发
+8. **推送通道**: 企业微信/飞书/邮箱/RSS，`notifier/` 包使用相对导入，通过 `send_alert()` / `send_batch_alert()` 触发。推送策略由 `push_mode` 控制（every=全推/important=仅≥4级/silent=不推），通过 `PipelineConfig.push_mode` 传入旧 pipeline，或由 Agent 工具 `push_report` 直接调用。
 9. **模型配置**: `update_llm_config()` 写入 `.env` 并立即更新内存 `settings`，避免重复 key
-10. **调度器**: `scheduler.py` 使用 APScheduler，扫描任务（IntervalTrigger）+ 每日简报任务（CronTrigger），配置变更时热重载
+10. **调度器**: `scheduler.py` 使用 APScheduler。`_run_scan()` 收集用户订阅，依 `pipeline_types` 分发：risk 走 `job_async()`（旧 pipeline），其他走 `_run_extra_pipelines_composite()`（组合工具）。`_run_user_workflows()` 每分钟检查用户 cron 工作流到期执行。
 11. **邮件模板**: `push_generator.py` 中三个 HTML 模板，BATCH_PUSH_HTML_TEMPLATE（批量预警）/ PUSH_HTML_TEMPLATE（单条预警）/ DAILY_SUMMARY_TEMPLATE（每日简报），均支持 `<details>` 可折叠
-12. **批量预警**: `send_batch_alert()` 将一次扫描的所有高危舆情合并成一封邮件/一条消息，各 channel 的 `send_batch()` 方法负责渲染批量内容
+12. **批量预警**: `send_batch_alert()` 将一次扫描的所有高危舆情合并成一封邮件/一条消息，各 channel 的 `send_batch()` 方法负责渲染批量内容。预警触发受 `push_mode` 管控（every=全部推/important=仅≥4级/silent=不推）。

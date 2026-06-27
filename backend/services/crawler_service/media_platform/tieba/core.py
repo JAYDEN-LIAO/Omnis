@@ -114,7 +114,7 @@ class TieBaCrawler(AbstractCrawler):
             )
 
             # Check login status and perform login if necessary
-            if not await self.tieba_client.pong(browser_context=self.browser_context):
+            if config.LOGIN_TYPE == "cookie" or not await self.tieba_client.pong(browser_context=self.browser_context):
                 login_obj = BaiduTieBaLogin(
                     login_type=config.LOGIN_TYPE,
                     login_phone="",  # your phone number

@@ -100,7 +100,7 @@ class KuaishouCrawler(AbstractCrawler):
 
             # Create a client to interact with the kuaishou website.
             self.ks_client = await self.create_ks_client(httpx_proxy_format)
-            if not await self.ks_client.pong():
+            if config.LOGIN_TYPE == "cookie" or not await self.ks_client.pong():
                 login_obj = KuaishouLogin(
                     login_type=config.LOGIN_TYPE,
                     login_phone=httpx_proxy_format,

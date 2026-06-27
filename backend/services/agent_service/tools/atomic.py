@@ -71,17 +71,20 @@ async def search_posts_tool(
         from backend.core.config import settings
 
         cookie = settings.WEIBO_COOKIE
-        if not cookie:
-            # 读自动保存的 cookie 文件
-            cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "weibo_cookie.txt")
-            if os.path.isfile(cookie_path):
-                try:
-                    with open(cookie_path, "r", encoding="utf-8") as f:
-                        cookie = f.read().strip()
-                except Exception:
-                    pass
-        if cookie:
-            logger.info(f"[search_posts] 使用 cookie 登录")
+        # cookie 仅对微博平台生效，其他平台不使用
+        if "wb" in plats:
+            if not cookie:
+                cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "weibo_cookie.txt")
+                if os.path.isfile(cookie_path):
+                    try:
+                        with open(cookie_path, "r", encoding="utf-8") as f:
+                            cookie = f.read().strip()
+                    except Exception:
+                        pass
+            if cookie:
+                logger.info(f"[search_posts] 使用 cookie 登录")
+        else:
+            cookie = ""
 
         collected = []
         seen_urls: set = set()

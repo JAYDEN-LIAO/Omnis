@@ -76,14 +76,14 @@ def start_task(background_tasks: BackgroundTasks, current_user: dict = Depends(g
 # ============================================================
 
 @router.post("/api/scheduler/start")
-def start_scheduler(current_user: dict = Depends(require_admin)):
+def start_scheduler(current_user: dict = Depends(require_registered_user)):
     from .scheduler import scheduler_start
     success, msg = scheduler_start()
     return {"code": 200, "msg": msg} if success else {"code": 400, "msg": msg}
 
 
 @router.post("/api/scheduler/stop")
-def stop_scheduler(current_user: dict = Depends(require_admin)):
+def stop_scheduler(current_user: dict = Depends(require_registered_user)):
     """停止定时调度器（v2.2：需认证）"""
     from .scheduler import scheduler_stop
     success, msg = scheduler_stop()

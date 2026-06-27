@@ -104,7 +104,7 @@ class ZhihuCrawler(AbstractCrawler):
 
             # Create a client to interact with the zhihu website.
             self.zhihu_client = await self.create_zhihu_client(httpx_proxy_format)
-            if not await self.zhihu_client.pong():
+            if config.LOGIN_TYPE == "cookie" or not await self.zhihu_client.pong():
                 login_obj = ZhiHuLogin(
                     login_type=config.LOGIN_TYPE,
                     login_phone="",  # input your phone number

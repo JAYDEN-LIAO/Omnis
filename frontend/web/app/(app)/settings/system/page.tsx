@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { radarApi, type SystemSettings } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -64,37 +64,12 @@ export default function SystemSettingsPage() {
     },
   });
 
-  // Auto-save: debounce form changes by 1.5s
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const watched = form.watch();
-  const freqValue = watched.monitor_frequency ?? 15;
-  const keywords = watched.keywords ?? [];
-  const inactive = watched.inactive_keywords ?? [];
-  const platforms = watched.platforms ?? [];
-  const isLoaded = useRef(false);
-
-  useEffect(() => {
-    if (!data) return;
-    // Skip the first effect run (data just populated the form)
-    if (!isLoaded.current) {
-      isLoaded.current = true;
-      return;
-    }
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      form.handleSubmit(
-        (v) => save.mutate(v),
-        (errors) => {
-          const first = Object.keys(errors)[0];
-          if (first) console.warn('[Settings] form invalid, not saving:', first, (errors as Record<string, unknown>)[first]);
-        },
-      )();
-    }, 1500);
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watched]);
+  const freqValue = form.watch('monitor_frequency') ?? 15;
+  const keywords = form.watch('keywords') ?? [];
+  const inactive = form.watch('inactive_keywords') ?? [];
+  const platforms = form.watch('platforms') ?? [];
+  const pushSummary = form.watch('push_summary');
+  const alertNegative = form.watch('alert_negative');
 
   const schedulerStart = useMutation({
     mutationFn: () => radarApi.schedulerStart(),
@@ -129,6 +104,16 @@ export default function SystemSettingsPage() {
     );
   }
 
+  const doSave = () => {
+    form.handleSubmit(
+      (v) => save.mutate(v),
+      (errors) => {
+        const first = Object.keys(errors)[0];
+        if (first) console.warn('[Settings] form invalid, not saving:', first);
+      },
+    )();
+  };
+
   const addKeyword = () => {
     if (!keywordDraft.trim()) return;
     if (keywords.includes(keywordDraft.trim())) {
@@ -137,8 +122,12 @@ export default function SystemSettingsPage() {
     }
     form.setValue('keywords', [...keywords, keywordDraft.trim()], { shouldValidate: true });
     setKeywordDraft('');
+    setTimeout(doSave, 0);
   };
-  const removeKeyword = (k: string) => form.setValue('keywords', keywords.filter((x) => x !== k), { shouldValidate: true });
+  const removeKeyword = (k: string) => {
+    form.setValue('keywords', keywords.filter((x) => x !== k), { shouldValidate: true });
+    setTimeout(doSave, 0);
+  };
 
   const addInactive = () => {
     if (!inactiveDraft.trim()) return;
@@ -153,6 +142,7 @@ export default function SystemSettingsPage() {
     } else {
       form.setValue('platforms', [...platforms, id], { shouldValidate: true });
     }
+    setTimeout(doSave, 0);
   };
 
   return (
@@ -408,6 +398,7 @@ export default function SystemSettingsPage() {
                   onChange={(e) => {
                     const v = Number(e.target.value);
                     form.setValue('monitor_frequency', v, { shouldValidate: true });
+                    setTimeout(doSave, 0);
                   }}
                 />
                 <div className="flex justify-between mt-2 label-caps text-[10px] text-[color:var(--on-surface-variant)]/60 data-mono">
@@ -423,7 +414,7 @@ export default function SystemSettingsPage() {
                   <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-2 block tracking-[0.15em]">启动窗口</label>
                   <input
                     type="time"
-                    {...form.register('start_time')}
+                    {...form.register('start_time', { onChange: () => setTimeout(doSave, 0) })}
                     className="w-full px-4 py-3 rounded-lg bg-white/60 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm data-mono text-[color:var(--on-surface)]"
                   />
                 </div>
@@ -431,7 +422,7 @@ export default function SystemSettingsPage() {
                   <label className="label-caps text-[10px] text-[color:var(--on-surface-variant)]/70 mb-2 block tracking-[0.15em]">简报时间</label>
                   <input
                     type="time"
-                    {...form.register('push_time')}
+                    {...form.register('push_time', { onChange: () => setTimeout(doSave, 0) })}
                     className="w-full px-4 py-3 rounded-lg bg-white/60 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm data-mono text-[color:var(--on-surface)]"
                   />
                 </div>
@@ -447,12 +438,15 @@ export default function SystemSettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => form.setValue('push_summary', !watched.push_summary)}
-                    className={`w-11 h-6 rounded-full relative transition-all ${watched.push_summary ? 'toggle-on' : 'toggle-off'}`}
+                    onClick={() => {
+                      form.setValue('push_summary', !pushSummary);
+                      setTimeout(doSave, 0);
+                    }}
+                    className={`w-11 h-6 rounded-full relative transition-all ${pushSummary ? 'toggle-on' : 'toggle-off'}`}
                   >
                     <div
                       className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all"
-                      style={{ right: watched.push_summary ? '0.125rem' : undefined, left: watched.push_summary ? undefined : '0.125rem' }}
+                      style={{ right: pushSummary ? '0.125rem' : undefined, left: pushSummary ? undefined : '0.125rem' }}
                     />
                   </button>
                 </div>
@@ -464,12 +458,15 @@ export default function SystemSettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => form.setValue('alert_negative', !watched.alert_negative)}
-                    className={`w-11 h-6 rounded-full relative transition-all ${watched.alert_negative ? 'toggle-on' : 'toggle-off'}`}
+                    onClick={() => {
+                      form.setValue('alert_negative', !alertNegative);
+                      setTimeout(doSave, 0);
+                    }}
+                    className={`w-11 h-6 rounded-full relative transition-all ${alertNegative ? 'toggle-on' : 'toggle-off'}`}
                   >
                     <div
                       className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all"
-                      style={{ right: watched.alert_negative ? '0.125rem' : undefined, left: watched.alert_negative ? undefined : '0.125rem' }}
+                      style={{ right: alertNegative ? '0.125rem' : undefined, left: alertNegative ? undefined : '0.125rem' }}
                     />
                   </button>
                 </div>
