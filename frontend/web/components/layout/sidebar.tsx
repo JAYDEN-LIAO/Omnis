@@ -42,25 +42,46 @@ export function Sidebar() {
         </button>
 
         {/* Brand */}
-        <div className={`mb-2 flex items-center h-20 ${collapsed ? 'pl-3 pr-6' : 'pl-3 pr-6 gap-3'}`}>
-          {/* Logo — same left offset in both states */}
-          <div className="shrink-0 flex items-center justify-center">
+        <div className={`mb-2 flex flex-col items-center justify-center overflow-hidden ${collapsed ? 'h-20' : 'h-24'}`}
+          style={{ transition: 'height 0.4s cubic-bezier(0.4, 0, 0.2, 1)' }}
+        >
+          {/* Logo — 等比缩放 */}
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: collapsed ? 52 : 72,
+              height: collapsed ? 28 : 38,
+              transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
             <Image
               src="/logo.svg"
               alt="Omnis"
-              width={52}
-              height={28}
+              width={collapsed ? 52 : 72}
+              height={collapsed ? 28 : 38}
               priority
               unoptimized
+              style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
             />
           </div>
 
-          {/* Version badge — only when expanded */}
-          {!collapsed && (
-            <span className="text-[7px] label-caps px-1.5 py-0.5 rounded border shrink-0" style={{ borderColor: 'oklch(0.78 0.16 85 / 0.3)', color: 'var(--primary-gold)' }}>
+          {/* V1.0.1 — logo 下方浮现/消失 */}
+          <div
+            className="flex items-center justify-center"
+            style={{
+              opacity: collapsed ? 0 : 1,
+              height: collapsed ? 0 : 18,
+              marginTop: collapsed ? 0 : 4,
+              transition: 'opacity 0.35s ease-out, height 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-top 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
+            <span
+              className="text-[7px] label-caps px-1.5 py-0.5 rounded border shrink-0"
+              style={{ borderColor: 'oklch(0.78 0.16 85 / 0.3)', color: 'var(--primary-gold)' }}
+            >
               {`v${pkg.version}`}
             </span>
-          )}
+          </div>
         </div>
 
         {/* Main navigation */}
