@@ -5,6 +5,8 @@ Agent Core - 单次异步流式主循环
 架构：TokenBudgetManager → AgentMemory → ToolExecutor
 """
 import json
+import os
+import re
 import threading
 import time
 import uuid
@@ -905,10 +907,60 @@ async def chat_with_agent_stream(
     )
     phase_build_context(ctx)
 
+    # ── API Key 检查：用户无系统权限且未配置自己的 Key → 提示引导 ──
+    _agent_key, _, _ = _get_agent_config_for(ctx.owner_id)
+    if not _agent_key:
+        logger.warning(f"[Agent] 用户 {ctx.owner_id[:8] if ctx.owner_id else '?'} 无可用 API Key")
+        yield emit_session(ctx.session_id)
+        yield emit_text(
+            "⚠️ 当前账号未配置 API Key，无法使用 AI 智能体。\n\n"
+            "你可以：\n"
+            "1. **配置自己的 API Key** — 进入「系统设置 → 模型设置」填写\n"
+            "2. **输入邀请码解锁** — 进入「系统设置 → 模型设置」底部输入邀请码，"
+            "使用系统预置的 API Key\n\n"
+            "完成任一操作后即可开始对话。"
+        )
+        yield emit_done()
+        return
+
     # 先返回 session_id（前端必须知道这个才能保持同一会话）
     yield emit_session(ctx.session_id)
 
     cancel_registry.register(ctx.session_id)
+
+    # ── Demo Mode: 预设问答拦截 ──
+    try:
+        _demo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                                   "scripts", "demo_qa.json")
+        if os.path.exists(_demo_path):
+            with open(_demo_path, "r", encoding="utf-8") as _f:
+                _demo_data = json.load(_f)
+            _last_msg = _get_last_user_message(ctx)
+            if _last_msg:
+                for _qa in _demo_data.get("qa", []):
+                    for _pattern in _qa.get("match", []):
+                        if re.search(_pattern, _last_msg, re.IGNORECASE):
+                            logger.info(f"[Demo] 命中预设问答: {_qa['id']}")
+                            # 总时长控制在 15~17 秒
+                            # 前 4~5 秒模拟"搜索中…"（爬虫感）
+                            _think = 4.0 + (hash(_qa['id'] + 'think') % 200) / 200.0
+                            await asyncio.sleep(_think)
+                            # 剩余时间用于逐字流式输出，根据回答长度动态计算间隔
+                            _answer = _qa["answer"]
+                            _remaining = 11.5  # 留给流式输出的秒数
+                            _chunk_size = 4
+                            _chunks = max(len(_answer) / _chunk_size, 1)
+                            _interval = _remaining / _chunks
+                            for _i, _char in enumerate(_answer):
+                                yield emit_text(_char)
+                                if _i % _chunk_size == 0:
+                                    await asyncio.sleep(_interval)
+                            # 收尾
+                            async for _chunk in phase_finish(ctx):
+                                yield _chunk
+                            return
+    except Exception as _e:
+        logger.warning(f"[Demo] 预设问答异常（不影响正常流程）: {_e}")
 
     # ── v2.0 P2: 四维智能规划 ──
     try:

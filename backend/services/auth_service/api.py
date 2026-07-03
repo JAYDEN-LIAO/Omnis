@@ -8,6 +8,7 @@ WS4: /api/auth/* 路由
 - /api/admin/users     — 用户管理（admin only）
 - /api/admin/users/{id} — 修改角色 / 禁用（admin only）
 """
+import re
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
@@ -29,6 +30,8 @@ from backend.core.auth_db import (
     change_password,
     set_password_for_oauth_user,
     reactivate_user,
+    redeem_invite_code,
+    get_user_system_access,
 )
 from backend.core.auth_jwt import encode_token, encode_access_token, encode_refresh_token, decode_token, revoke_token, encode_guest_access_token
 from backend.core.auth_deps import get_current_user, require_admin
@@ -72,6 +75,19 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+def _validate_password_strength(password: str) -> Optional[str]:
+    """校验密码强度，返回错误信息或 None"""
+    if len(password) < 8:
+        return "密码至少 8 位"
+    if not re.search(r"[A-Z]", password):
+        return "密码需要包含至少一个大写字母"
+    if not re.search(r"[a-z]", password):
+        return "密码需要包含至少一个小写字母"
+    if not re.search(r"\d", password):
+        return "密码需要包含至少一个数字"
+    return None
+
+
 # v2.2 P1#14：refresh token 请求体
 class RefreshRequest(BaseModel):
     refresh_token: str
@@ -83,6 +99,10 @@ class ProfileUpdateRequest(BaseModel):
 
 class SetPasswordRequest(BaseModel):
     new_password: str
+
+
+class InviteCodeRequest(BaseModel):
+    code: str
 
 
 class UpdateRoleRequest(BaseModel):
@@ -129,6 +149,9 @@ async def change_password_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """修改当前用户的密码。需提供旧密码。"""
+    err = _validate_password_strength(req.new_password)
+    if err:
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": err, "data": None})
     try:
         ok = change_password(current_user["id"], req.old_password, req.new_password)
     except ValueError as e:
@@ -145,6 +168,9 @@ async def set_password_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """为 OAuth-only 用户首次设置本地密码（已设过密码的用户应走 change-password）。"""
+    err = _validate_password_strength(req.new_password)
+    if err:
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": err, "data": None})
     try:
         ok = set_password_for_oauth_user(current_user["id"], req.new_password)
     except ValueError as e:
@@ -175,8 +201,9 @@ async def register(req: RegisterRequest):
     """邮箱密码注册"""
     if not req.email or not req.password:
         raise HTTPException(status_code=400, detail={"code": 400, "msg": "邮箱和密码不能为空", "data": None})
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail={"code": 400, "msg": "密码至少 6 位", "data": None})
+    err = _validate_password_strength(req.password)
+    if err:
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": err, "data": None})
 
     nickname = req.nickname.strip() or req.email.split("@")[0]
     user = create_local_user(email=req.email.strip(), password=req.password, nickname=nickname)
@@ -226,6 +253,33 @@ async def guest_login(request: Request):
             },
         },
     }
+
+
+@router.post("/api/auth/redeem-invite")
+async def redeem_invite(
+    req: InviteCodeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """兑换邀请码，开通系统 Key 权限。"""
+    if current_user.get("role") == "guest":
+        raise HTTPException(status_code=403, detail={"code": 403, "msg": "游客无法兑换邀请码，请先注册", "data": None})
+
+    success, msg = redeem_invite_code(req.code, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": msg, "data": None})
+    return {"code": 200, "msg": msg, "data": None}
+
+
+@router.get("/api/auth/invite-status")
+async def invite_status(
+    current_user: dict = Depends(get_current_user),
+):
+    """查询当前用户的系统 Key 权限状态。"""
+    if current_user.get("role") == "guest":
+        return {"code": 200, "data": {"has_system_access": False}}
+
+    has_access = get_user_system_access(current_user["id"])
+    return {"code": 200, "data": {"has_system_access": has_access}}
 
 
 @router.post("/api/auth/login")

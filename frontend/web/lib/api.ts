@@ -242,6 +242,15 @@ export const authApi = {
       method: 'PUT',
       body: JSON.stringify({ nickname }),
     }),
+
+  redeemInvite: (code: string) =>
+    request<{ msg: string }>('/api/auth/redeem-invite', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  inviteStatus: () =>
+    request<{ has_system_access: boolean }>('/api/auth/invite-status'),
 };
 
 export const llmApi = {

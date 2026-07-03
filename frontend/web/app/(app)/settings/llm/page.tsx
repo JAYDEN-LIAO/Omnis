@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
-import { llmApi, type LLMConfigItem } from '@/lib/api';
+import { llmApi, authApi, type LLMConfigItem } from '@/lib/api';
 import { toast } from 'sonner';
 import { GuestBlock } from '@/components/layout/guest-block';
 import { isGuest } from '@/lib/auth-client';
@@ -61,7 +61,95 @@ export default function LLMSettingsPage() {
         </div>
       </div>
 
+      {/* ── 邀请码解锁区域 ── */}
+      <InviteCodeSection />
+
       <div className="h-12" />
+    </div>
+  );
+}
+
+function InviteCodeSection() {
+  const [code, setCode] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+
+  // 查询当前权限状态
+  const { data: accessData, isLoading: accessLoading } = useQuery({
+    queryKey: ['invite-status'],
+    queryFn: () => authApi.inviteStatus(),
+  });
+
+  const hasAccess = accessData?.has_system_access;
+
+  const handleRedeem = async () => {
+    if (!code.trim()) { toast.error('请输入邀请码'); return; }
+    setStatus('loading');
+    try {
+      const res = await authApi.redeemInvite(code.trim());
+      setStatus('success');
+      setMessage(res.msg || '邀请码兑换成功');
+      toast.success(res.msg || '邀请码兑换成功');
+      // 刷新状态
+      window.location.reload();
+    } catch (err: unknown) {
+      setStatus('error');
+      const msg = (err as { message?: string })?.message || '兑换失败，请检查邀请码是否正确';
+      setMessage(msg);
+      toast.error(msg);
+    }
+  };
+
+  return (
+    <div className="glass-slab rounded-xl overflow-hidden mt-6">
+      <div className="p-8">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="material-symbols-outlined text-lg text-[color:var(--primary-gold)]">vpn_key</span>
+          <h3 className="serif-headline text-xl text-[color:var(--on-surface)]">邀请码解锁</h3>
+        </div>
+        <p className="text-sm text-[color:var(--on-surface-variant)] mb-6">
+          {hasAccess
+            ? '✅ 当前账号已拥有系统 Key 权限，无需再次兑换。'
+            : '输入邀请码解锁系统预置的 API Key，无需自行配置即可使用 AI 智能体。'}
+        </p>
+
+        {!hasAccess && (
+          <div className="flex items-end gap-3">
+            <div className="flex-1 max-w-sm">
+              <label className="block text-xs font-semibold text-[color:var(--on-surface-variant)] label-caps mb-1">
+                邀请码
+              </label>
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => { setCode(e.target.value); setStatus('idle'); }}
+                placeholder="请输入邀请码"
+                className="w-full bg-white/70 border border-[color:var(--border-faint)] focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.15)] rounded-lg px-3 py-2 text-sm transition-all outline-none uppercase"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRedeem(); }}
+              />
+              {status === 'error' && message && (
+                <p className="text-xs text-red-500 mt-1">{message}</p>
+              )}
+              {status === 'success' && message && (
+                <p className="text-xs text-green-600 mt-1">{message}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleRedeem}
+              disabled={status === 'loading'}
+              className="brushed-gold hover:opacity-95 px-5 py-2 rounded-lg text-sm font-bold text-white transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {status === 'loading' ? (
+                <span className="material-symbols-outlined text-sm animate-spin">sync</span>
+              ) : (
+                <span className="material-symbols-outlined text-sm">check</span>
+              )}
+              兑换
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

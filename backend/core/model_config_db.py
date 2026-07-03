@@ -8,6 +8,7 @@ from typing import Optional
 
 from backend.core.database import get_db_connection
 from backend.core.logger import get_logger
+from backend.core.crypto_utils import encrypt_dict_api_key, decrypt_dict_api_key
 
 logger = get_logger("core.modelcfg")
 
@@ -50,7 +51,7 @@ def _row_to_dict(row) -> dict:
 
 
 def get_model_config(owner_id: str, agent_role: str) -> Optional[dict]:
-    """查某用户某角色的模型配置"""
+    """查某用户某角色的模型配置（api_key 自动解密）"""
     if agent_role not in AGENT_ROLES:
         return None
     _ensure_model_config_table()
@@ -62,7 +63,8 @@ def get_model_config(owner_id: str, agent_role: str) -> Optional[dict]:
             (owner_id, agent_role),
         )
         row = cursor.fetchone()
-    return _row_to_dict(row) if row else None
+    cfg = _row_to_dict(row) if row else None
+    return decrypt_dict_api_key(cfg) if cfg else None
 
 
 def list_model_configs(owner_id: str) -> list[dict]:
@@ -102,7 +104,7 @@ def upsert_model_config(
     api_key: Optional[str] = None,
     base_url: str = "",
 ) -> dict:
-    """插入或更新某用户某角色的模型配置"""
+    """插入或更新某用户某角色的模型配置（api_key 自动加密存储）"""
     if agent_role not in AGENT_ROLES:
         raise ValueError(f"invalid agent_role: {agent_role}")
     if provider and provider not in PROVIDERS:
@@ -121,6 +123,9 @@ def upsert_model_config(
         # api_key 为 None 时保留旧值
         if api_key is None:
             api_key = existing[0] if existing else ""
+        else:
+            # 加密存储
+            api_key = encrypt_dict_api_key({"api_key": api_key})["api_key"]
 
         cursor.execute('''
             INSERT INTO model_config
@@ -155,6 +160,11 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
     """
     获取用户的有效模型配置（user 配置 + system default 回退）。
     用于实际 LLM 调用。
+
+    权限规则（v2.3）：
+    - 用户自己配了 API Key → 始终可用
+    - 用户有 has_system_access → 可用系统默认 Key
+    - 用户无 Key 也无权限 → api_key 返回空字符串（调用方应提示引导）
     """
     user_cfg = get_model_config(owner_id, agent_role)
     # 系统默认从 settings 读（沿用现有 config.py 的 DEFAULT_* 字段）
@@ -164,6 +174,9 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
         # 优先 user 配置
         if user_cfg and user_cfg.get(name):
             return user_cfg[name]
+        # 用户无系统权限 → 不返回系统默认 Key
+        if name == "api_key" and not _check_user_system_access(owner_id):
+            return ""
         # 回退到角色专属系统配置（如 ASSISTANT_MODEL / EMBEDDING_MODEL）
         role_config = getattr(settings, f"{agent_role}_{name.upper()}", "") or ""
         if role_config:
@@ -178,3 +191,13 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
         "base_url": _field("base_url"),
         "is_user_override": user_cfg is not None and bool(user_cfg.get("model")),
     }
+
+
+def _check_user_system_access(owner_id: str) -> bool:
+    """检查用户是否有系统 Key 权限（避免循环导入）"""
+    try:
+        from backend.core.auth_db import get_user_system_access
+        return get_user_system_access(owner_id)
+    except Exception:
+        # 降级：数据库不可读时允许访问（不误伤）
+        return True
