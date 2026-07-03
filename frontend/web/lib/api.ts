@@ -29,11 +29,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (res.status === 403) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.msg || '权限不足');
+    throw new Error(body?.detail?.msg || body?.msg || '权限不足');
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.msg || `HTTP ${res.status}`);
+    const errMsg = body?.detail?.msg || body?.msg || `HTTP ${res.status}`;
+    throw new Error(errMsg);
   }
   const json = await res.json();
   // 自动拆解 { code, data, msg } → data，保持前端简洁
