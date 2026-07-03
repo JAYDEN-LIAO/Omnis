@@ -84,29 +84,9 @@ jobs:
             source venv/bin/activate
             pip install -r requirements.txt --quiet --no-python-version-warning
 
-            # 重启 gunicorn — 优先 HUP 优雅重启，失败则冷启动
-            if [ -f gunicorn.pid ] && kill -0 "$(cat gunicorn.pid)" 2>/dev/null; then
-              kill -HUP "$(cat gunicorn.pid)"
-              echo "✅ gunicorn 优雅重启成功 (PID $(cat gunicorn.pid))"
-            else
-              echo "⚠️  gunicorn.pid 无效或不存在，执行冷启动..."
-              # 清理残留的 gunicorn 进程
-              pkill -f "gunicorn.*main:app" 2>/dev/null || true
-              sleep 1
-              # 以 www 用户启动
-              su -s /bin/bash -c '
-                cd /www/wwwroot/omnis_backend
-                source venv/bin/activate
-                nohup venv/bin/gunicorn backend.gateway.main:app \
-                  --workers 2 \
-                  --worker-class uvicorn.workers.UvicornWorker \
-                  --bind 0.0.0.0:8010 \
-                  --timeout 120 \
-                  --pid /www/wwwroot/omnis_backend/gunicorn.pid \
-                  > /dev/null 2>&1 &
-              ' www
-              echo "✅ gunicorn 冷启动完成"
-            fi
+            # 重启 systemd 服务（以 root 身份读取 .env，兼容 600 权限）
+            systemctl restart omnis-api
+            echo "✅ omnis-api 已重启"
 
       # ======== 健康检查 ========
       - name: Health check
