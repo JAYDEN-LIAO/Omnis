@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import re
 import sqlite3
 import time
@@ -16,9 +17,12 @@ from typing import Any, Dict, List, Optional
 
 from backend.core.database import get_db_connection
 from backend.core.logger import get_logger
-from backend.services.agent_service.tools._base import get_tool
 
 logger = get_logger("agent.workflows")
+
+# ── 工作流取消事件（从 scheduler 迁移至此，消除跨服务依赖）──
+_WF_CANCEL_EVENTS: dict[int, asyncio.Event] = {}
+_WF_CANCEL_LOCK = threading.Lock()
 
 # ★ R-004: 正则提取 step_N 中的整数 N
 _STEP_IDX_RE = re.compile(r"^step_(\d+)$")
@@ -130,24 +134,26 @@ PRESET_WORKFLOWS = [
 
 
 def init_preset_workflows():
-    """DB seed — 启动时调用一次。重复调用不会产生重复条目（按 name UPSERT）。"""
+    """DB seed — 启动时调用一次。重复调用不会产生重复条目（先查后插）。"""
     with get_db_connection() as conn:
         c = conn.cursor()
+        # 确保 (source, name) 唯一，用于 INSERT OR REPLACE
+        try:
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_wf_preset ON workflows(source, name)")
+        except Exception:
+            pass
+        now = datetime.now().isoformat()
         for wf in PRESET_WORKFLOWS:
             c.execute("""
-                INSERT INTO workflows
+                INSERT OR REPLACE INTO workflows
                 (owner_id, name, description, steps_json, constraints_template,
                  source, is_composite_tool, enabled, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    description = excluded.description,
-                    steps_json = excluded.steps_json,
-                    updated_at = excluded.updated_at
             """, (
                 wf["owner_id"], wf["name"], wf["description"],
                 wf["steps_json"], wf.get("constraints_template", "{}"),
                 wf["source"], wf["is_composite_tool"],
-                datetime.now().isoformat(), datetime.now().isoformat(),
+                now, now,
             ))
         conn.commit()
     logger.info(f"[Workflows] preset seed 完成: {len(PRESET_WORKFLOWS)} 个")
@@ -229,6 +235,7 @@ async def execute_workflow_steps(
         params["_owner_id"] = owner_id  # 强制注入
 
         # ★ R-001: get_tool 返回 dict，用 ["func"] 取
+        from backend.services.agent_service.tools._base import get_tool
         meta = get_tool(tool_name)
         if not meta or "func" not in meta:
             return json.dumps({
@@ -306,6 +313,60 @@ def _log_workflow_execution(
     except Exception as e:
         logger.warning(f"[Workflow] 写执行日志失败: {e}")
 
+# ============================================================
+# Cron 表达式匹配（标准 5 字段）
+# ============================================================
+
+_CRON_FIELD_PATTERNS = [
+    (0, 59, "minute"),
+    (0, 23, "hour"),
+    (1, 31, "day-of-month"),
+    (1, 12, "month"),
+    (0, 6, "day-of-week"),
+]
+
+
+def _match_cron_field(value: int, pattern: str, lo: int, hi: int) -> bool:
+    """判断 value 是否匹配单个 cron 字段。"""
+    if pattern == "*":
+        return True
+    # */N
+    if pattern.startswith("*/"):
+        try:
+            step = int(pattern[2:])
+            return step > 0 and value % step == 0
+        except (ValueError, IndexError):
+            return False
+    # N (exact)
+    try:
+        return int(pattern) == value
+    except ValueError:
+        pass
+    # a-b (range)
+    if "-" in pattern:
+        parts = pattern.split("-", 1)
+        try:
+            return int(parts[0]) <= value <= int(parts[1])
+        except ValueError:
+            return False
+    # a,b,c (list)
+    if "," in pattern:
+        return any(_match_cron_field(value, p.strip(), lo, hi) for p in pattern.split(",") if p.strip())
+    return False
+
+
+def _match_cron(cron_expr: str, dt: datetime) -> bool:
+    """判断 datetime 是否匹配标准 5 字段 cron 表达式。"""
+    parts = cron_expr.strip().split()
+    if len(parts) != 5:
+        logger.warning(f"[Cron] 无效 cron 表达式: {cron_expr}")
+        return False
+    values = [dt.minute, dt.hour, dt.day, dt.month, dt.weekday()]
+    for i, (lo, hi, name) in enumerate(_CRON_FIELD_PATTERNS):
+        if not _match_cron_field(values[i], parts[i], lo, hi):
+            return False
+    return True
+
 
 # ============================================================
 # WorkflowsDB CRUD
@@ -350,12 +411,15 @@ class WorkflowsDB:
                 "CREATE INDEX IF NOT EXISTS idx_wf_source ON workflows(source)",
                 "CREATE INDEX IF NOT EXISTS idx_wf_enabled ON workflows(enabled)",
                 "CREATE INDEX IF NOT EXISTS idx_wf_composite ON workflows(is_composite_tool)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_wf_preset ON workflows(source, name)",
             ]:
                 try:
                     c.execute(ddl)
                 except Exception:
                     pass
             conn.commit()
+        # 确保预设工作流已写入 DB（幂等，每次实例化时检查）
+        init_preset_workflows()
 
     def query(self, sql: str, params: list = None) -> List[Dict]:
         with self._get_conn() as conn:
@@ -466,10 +530,18 @@ class WorkflowsDB:
             conn.commit()
 
     def list_due_user_workflows(self) -> List[Dict]:
-        return self.query(
+        """返回 cron 表达式匹配当前时间的用户工作流。"""
+        now = datetime.now()
+        all_enabled = self.query(
             "SELECT * FROM workflows WHERE source='user' "
             "AND schedule_cron != '' AND enabled=1"
         )
+        due = []
+        for wf in all_enabled:
+            cron = (wf.get("schedule_cron") or "").strip()
+            if cron and _match_cron(cron, now):
+                due.append(wf)
+        return due
 
     def mark_workflow_run(self, wf_id: int, last_run_iso: str):
         with self._get_conn() as conn:

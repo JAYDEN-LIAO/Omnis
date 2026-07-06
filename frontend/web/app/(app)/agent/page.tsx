@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { useAgentStream } from '@/components/chat/useAgentStream';
@@ -81,6 +81,7 @@ const WELCOME_PILLS = [
 
 export default function AgentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [history, setHistory] = useState<UIMessage[]>([]);
   const [input, setInput] = useState('');
@@ -88,6 +89,7 @@ export default function AgentPage() {
   const [greeting, setGreeting] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [greetingAnimKey, setGreetingAnimKey] = useState(0);
+  const initialSent = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingSessionsRef = useRef<AgentSession[]>([]);
@@ -214,6 +216,19 @@ export default function AgentPage() {
       onSessionId: (sid) => setSessionId(sid),
     });
   };
+
+  // 来自工作台预设工作流的自动触发（必须放在 sendMessage 定义之后）
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q && !initialSent.current) {
+      initialSent.current = true;
+      const timer = setTimeout(() => {
+        sendMessage(q);
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, sendMessage]);
 
   const isGuestUser = isGuest();
 

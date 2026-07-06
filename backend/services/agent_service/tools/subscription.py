@@ -14,9 +14,9 @@ import json
 from typing import Optional
 
 from backend.core.logger import get_logger
-from backend.core.model_config_db import get_effective_config
-from backend.core.quota_db import check_quota
-from backend.core.subscription_db import (
+from backend.shared.db.model_config_db import get_effective_config
+from backend.shared.db.quota_db import check_quota
+from backend.shared.db.subscription_db import (
     VALID_POLARITY,
     VALID_PUSH_MODE,
     VALID_SENSITIVITY,
@@ -257,7 +257,7 @@ def remove_subscription_tool(subscription_id: str, _owner_id: str) -> str:
 #     输出 confirm 卡片，等用户点确认才能 add_subscription
 # ───────────────────────────────────────────────────────────────
 _INTENT_PROMPT = """\
-你是 MediaRadar 的订阅意图解析器。用户用自然语言表达想"关注/盯/订阅"某个对象，\
+你是 Omnis 的订阅意图解析器。用户用自然语言表达想"关注/盯/订阅"某个对象，\
 你需要把它结构化成 JSON。
 
 【类型 type】（必填，五选一）

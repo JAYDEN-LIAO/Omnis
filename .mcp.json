@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "mediaradar": {
-      "command": "D:/JAYDEN/develop/work/MediaRadar/venv/Scripts/python",
+      "command": "D:/JAYDEN/develop/work/Omnis/venv/Scripts/python",
       "args": [
         "-m",
         "backend.services.mcp_service.mcp_server"
       ],
       "env": {
-        "PYTHONPATH": "D:/JAYDEN/develop/work/MediaRadar/backend"
+        "PYTHONPATH": "D:/JAYDEN/develop/work/Omnis/backend"
       }
     }
   }

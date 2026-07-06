@@ -12,18 +12,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 
-from backend.core.auth_deps import get_current_user, require_admin, require_registered_user
-from backend.core.subscription_db import (
+from backend.services.auth_service.deps import get_current_user, require_admin, require_registered_user
+from backend.shared.db.subscription_db import (
     list_subscriptions, get_subscription_by_id,
     create_subscription, update_subscription, delete_subscription,
 )
-from backend.core.model_config_db import (
+from backend.shared.db.model_config_db import (
     list_model_configs, upsert_model_config, delete_model_config, get_model_config,
     AGENT_ROLES,
 )
-from backend.core.quota_db import get_quota, update_quota, increment_chat_count
+from backend.shared.db.quota_db import get_quota, update_quota, increment_chat_count
 from backend.core.quota import enforce_quota
-from backend.core.auth_db import list_users, deactivate_user, get_user_by_id, update_user_role
+from backend.services.auth_service.db import list_users, deactivate_user, get_user_by_id, update_user_role
 from backend.core.logger import get_logger
 
 logger = get_logger("subscription.api")
@@ -250,7 +250,7 @@ def api_admin_stats(_: dict = Depends(require_admin)):
 
     # 调度器状态
     try:
-        from services.radar_service.scheduler import scheduler_status
+        from services.platform_service.scheduler import scheduler_status
         s = scheduler_status()
         result["scheduler_active"] = s.get("active", False)
     except Exception:

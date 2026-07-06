@@ -1,40 +1,34 @@
 """
 WS4: /api/auth/* 路由
 
-- /api/auth/me         — 当前用户信息（需 token）
-- /api/auth/logout     — 撤销 token（需 token）
-- /api/auth/oauth/{provider}/login    — 跳转 OAuth（mock 占位，等真实 credentials）
+- /api/auth/me              — 当前用户信息（需 token）
+- /api/auth/logout          — 撤销 token（需 token）
+- /api/auth/oauth/{provider}/login    — 跳转 OAuth
 - /api/auth/oauth/{provider}/callback — OAuth 回调
-- /api/admin/users     — 用户管理（admin only）
-- /api/admin/users/{id} — 修改角色 / 禁用（admin only）
 """
 import re
 from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
 from backend.core.config import settings
 from backend.core.logger import get_logger
-from backend.core.auth_db import (
+from .db import (
     init_auth_tables,
     get_user_by_id,
-    list_users,
-    update_user_role,
     update_user_profile,
-    deactivate_user,
     create_user,
     create_local_user,
     authenticate_local,
     update_last_login,
     change_password,
     set_password_for_oauth_user,
-    reactivate_user,
     redeem_invite_code,
     get_user_system_access,
 )
-from backend.core.auth_jwt import encode_token, encode_access_token, encode_refresh_token, decode_token, revoke_token, encode_guest_access_token
-from backend.core.auth_deps import get_current_user, require_admin
+from .jwt import encode_token, encode_access_token, encode_refresh_token, decode_token, revoke_token, encode_guest_access_token
+from .deps import get_current_user, require_admin
 
 logger = get_logger("auth.api")
 router = APIRouter()
@@ -289,7 +283,7 @@ async def login(req: LoginRequest):
     password = req.password
 
     # WS6-C4 v2.2: 失败锁定检查
-    from backend.core.login_lockout import is_locked, record_failure, record_success
+    from .db.lockout import is_locked, record_failure, record_success
     locked, retry_after = is_locked(email)
     if locked:
         raise HTTPException(
@@ -471,70 +465,4 @@ async def oauth_callback(provider: str, code: str, state: str = ""):
     logger.info(f"[AuthAPI] Google 登录成功 user_id={user['id']} email={email}")
     redirect_url = f"{settings.OAUTH_REDIRECT_BASE}/auth/callback?token={access}"
     return RedirectResponse(url=redirect_url, status_code=302)
-
-
-# ==================== /api/admin/* ====================
-
-@router.get("/api/admin/users")
-async def admin_list_users(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    keyword: str = Query(default=""),
-    admin_user: dict = Depends(require_admin),
-):
-    """用户列表（admin only）"""
-    result = list_users(page=page, page_size=page_size, keyword=keyword)
-    # 隐藏敏感字段
-    for u in result["items"]:
-        u.pop("oauth_id", None)
-    return {"code": 200, "msg": "OK", "data": result}
-
-
-@router.patch("/api/admin/users/{user_id}")
-async def admin_update_user(
-    user_id: str,
-    req: UpdateRoleRequest,
-    admin_user: dict = Depends(require_admin),
-):
-    """修改用户角色（admin only）"""
-    if req.role not in ("user", "admin"):
-        raise HTTPException(status_code=400, detail={"code": 400, "msg": "role 必须是 user/admin", "data": None})
-    target = get_user_by_id(user_id)
-    if not target:
-        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
-    if target["id"] == admin_user["id"] and req.role != "admin":
-        raise HTTPException(status_code=400, detail={"code": 400, "msg": "不能降级自己", "data": None})
-    update_user_role(user_id, req.role)
-    logger.info(f"[AuthAPI] admin {admin_user['id']} 修改用户 {user_id} 角色为 {req.role}")
-    return {"code": 200, "msg": "已更新", "data": {"user_id": user_id, "role": req.role}}
-
-
-@router.delete("/api/admin/users/{user_id}")
-async def admin_deactivate_user(
-    user_id: str,
-    admin_user: dict = Depends(require_admin),
-):
-    """禁用用户（admin only）。L2 v2.2: 同时撤销该用户全部已签发 token。"""
-    if user_id == admin_user["id"]:
-        raise HTTPException(status_code=400, detail={"code": 400, "msg": "不能禁用自己", "data": None})
-    target = get_user_by_id(user_id)
-    if not target:
-        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
-    deactivate_user(user_id)
-    logger.info(f"[AuthAPI] admin {admin_user['id']} 禁用用户 {user_id}（含 token 撤销）")
-    return {"code": 200, "msg": "已禁用", "data": {"user_id": user_id}}
-
-
-# L2 v2.2: 重新激活用户
-@router.post("/api/admin/users/{user_id}/reactivate")
-async def admin_reactivate_user(
-    user_id: str,
-    admin_user: dict = Depends(require_admin),
-):
-    """重新激活用户（admin only）。清空 tokens_invalid_after。"""
-    target = get_user_by_id(user_id)
-    if not target:
-        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
-    reactivate_user(user_id)
-    logger.info(f"[AuthAPI] admin {admin_user['id']} 重新激活用户 {user_id}")
-    return {"code": 200, "msg": "已重新激活", "data": {"user_id": user_id}}
+# Admin 用户管理路由已迁移至 admin_service/api.py

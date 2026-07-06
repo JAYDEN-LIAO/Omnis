@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>话题推送 - Omnis</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f2f5;padding:16px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+
+          <!-- 话题标题栏 -->
+          <tr>
+            <td style="padding:20px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    <h2 style="margin:0;font-size:18px;font-weight:700;color:#0d1b2a;">{topic_name}</h2>
+                  </td>
+                  <td align="right" style="vertical-align:middle;">
+                    <span style="display:inline-block;padding:3px 10px;background:{risk_bg};color:#fff;
+                                 border-radius:4px;font-size:11px;font-weight:600;">{risk_label}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- 热度指标 -->
+          <tr>
+            <td style="padding:0 24px 16px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
+                    <div style="font-size:18px;font-weight:700;color:#0d1b2a;">{post_count}</div>
+                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">相关讨论</div>
+                  </td>
+                  <td width="6"></td>
+                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
+                    <div style="font-size:18px;font-weight:700;color:#0d1b2a;">{platform_count}</div>
+                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">涉及平台</div>
+                  </td>
+                  <td width="6"></td>
+                  <td width="33%" style="text-align:center;padding:8px 0;background:#f8f9fa;border-radius:6px;">
+                    <div style="font-size:18px;font-weight:700;color:{heat_color};">{heat_pct}</div>
+                    <div style="font-size:11px;color:#7f8c8d;margin-top:2px;">热度变化</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- 摘要 -->
+          <tr>
+            <td style="padding:0 24px 16px;">
+              <div style="background:#f4f7fb;border-radius:8px;padding:14px 16px;">
+                <p style="margin:0;font-size:13px;color:#2d3f52;line-height:1.7;">{summary}</p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- 核心问题（折叠） -->
+          <tr>
+            <td style="padding:0 24px;">
+              <details style="display:block;">
+                <summary style="cursor:pointer;user-select:none;padding:10px 0;list-style:none;border-top:1px solid #eee;">
+                  <span style="font-size:12px;font-weight:600;color:#0d1b2a;">核心问题</span>
+                  <span style="float:right;font-size:11px;color:#8a9aaa;">▼</span>
+                </summary>
+                <div style="padding:10px 0 14px;font-size:13px;color:#555;line-height:1.6;">
+                  {core_issue}
+                </div>
+              </details>
+            </td>
+          </tr>
+
+          <!-- 帖子链接 -->
+          <tr>
+            <td style="padding:0 24px 20px;">
+              <details style="display:block;">
+                <summary style="cursor:pointer;user-select:none;padding:10px 0;list-style:none;border-top:1px solid #eee;">
+                  <span style="font-size:12px;font-weight:600;color:#0d1b2a;">溯源链接 ({link_count})</span>
+                  <span style="float:right;font-size:11px;color:#8a9aaa;">▶</span>
+                </summary>
+                <div style="padding:10px 0 0;">
+                  {link_items}
+                </div>
+              </details>
+            </td>
+          </tr>
+
+          <!-- 底部 -->
+          <tr>
+            <td style="padding:16px 24px 20px;border-top:1px solid #eee;">
+              <p style="margin:0;text-align:center;font-size:10px;color:#8a9aaa;letter-spacing:0.5px;">
+                Omnis · 媒体信息订阅 · {generated_time}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

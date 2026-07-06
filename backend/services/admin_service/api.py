@@ -1,14 +1,92 @@
 """
-Admin Agent 监控 API + Agent Ops Engine 智能运维
+Admin Agent 监控 API + 用户管理 + Agent Ops Engine 智能运维
 """
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from pydantic import BaseModel
 
-from backend.core.auth_deps import require_admin
-from backend.core.auth_jwt import decode_token
+from backend.services.auth_service.deps import require_admin
+from backend.services.auth_service.jwt import decode_token
+from backend.services.auth_service.db import list_users, get_user_by_id, update_user_role, deactivate_user, reactivate_user
+from backend.core.logger import get_logger
 from .agent_monitor import get_agent_monitor
+
+logger = get_logger("admin.api")
+
+# ── 用户管理路由（从 auth_service 迁移至此）──
+
+admin_users_router = APIRouter(prefix="/api/admin", tags=["Admin 用户管理"])
+
+
+class UpdateRoleRequest(BaseModel):
+    role: str  # "user" | "admin"
+
+
+@admin_users_router.get("/users")
+async def admin_list_users(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    keyword: str = Query(default=""),
+    admin_user: dict = Depends(require_admin),
+):
+    """用户列表（admin only）"""
+    result = list_users(page=page, page_size=page_size, keyword=keyword)
+    for u in result["items"]:
+        u.pop("oauth_id", None)
+    return {"code": 200, "msg": "OK", "data": result}
+
+
+@admin_users_router.patch("/users/{user_id}")
+async def admin_update_user(
+    user_id: str,
+    req: UpdateRoleRequest,
+    admin_user: dict = Depends(require_admin),
+):
+    """修改用户角色（admin only）"""
+    if req.role not in ("user", "admin"):
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": "role 必须是 user/admin", "data": None})
+    target = get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
+    if target["id"] == admin_user["id"] and req.role != "admin":
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": "不能降级自己", "data": None})
+    update_user_role(user_id, req.role)
+    logger.info(f"admin {admin_user['id']} 修改用户 {user_id} 角色为 {req.role}")
+    return {"code": 200, "msg": "已更新", "data": {"user_id": user_id, "role": req.role}}
+
+
+@admin_users_router.delete("/users/{user_id}")
+async def admin_deactivate_user(
+    user_id: str,
+    admin_user: dict = Depends(require_admin),
+):
+    """禁用用户（admin only）。同时撤销该用户全部已签发 token。"""
+    if user_id == admin_user["id"]:
+        raise HTTPException(status_code=400, detail={"code": 400, "msg": "不能禁用自己", "data": None})
+    target = get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
+    deactivate_user(user_id)
+    logger.info(f"admin {admin_user['id']} 禁用用户 {user_id}")
+    return {"code": 200, "msg": "已禁用", "data": {"user_id": user_id}}
+
+
+@admin_users_router.post("/users/{user_id}/reactivate")
+async def admin_reactivate_user(
+    user_id: str,
+    admin_user: dict = Depends(require_admin),
+):
+    """重新激活用户（admin only）。清空 tokens_invalid_after。"""
+    target = get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail={"code": 404, "msg": "用户不存在", "data": None})
+    reactivate_user(user_id)
+    logger.info(f"admin {admin_user['id']} 重新激活用户 {user_id}")
+    return {"code": 200, "msg": "已重新激活", "data": {"user_id": user_id}}
+
+
+# ── Agent 监控路由 ──
 
 router = APIRouter(prefix="/api/admin/agents", tags=["Admin Agent 监控"])
 
@@ -151,7 +229,7 @@ async def admin_cancel_workflow(
     _=Depends(require_admin),
 ):
     """Admin 取消任意用户的工作流（无需 owner 校验）"""
-    from backend.services.radar_service.scheduler import (
+    from backend.services.platform_service.scheduler import (
         _WF_CANCEL_EVENTS, _WF_CANCEL_LOCK,
     )
     with _WF_CANCEL_LOCK:

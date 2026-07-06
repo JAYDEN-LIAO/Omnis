@@ -18,7 +18,7 @@ Repository: https://github.com/NanmiCoder/MediaCrawler
 Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 ```
 
-爬虫目录是 fork 的 MediaCrawler，许可证为 **NON-COMMERCIAL LEARNING LICENSE1.1** —— **禁止商业用途**。MediaRadar 商业化上线前必须：
+爬虫目录是 fork 的 MediaCrawler，许可证为 **NON-COMMERCIAL LEARNING LICENSE1.1** —— **禁止商业用途**。Omnis 商业化上线前必须：
 1. 联系作者获取商用授权
 2. 或自研替换
 3. 或换 AGPL/MIT 等可商用项目
@@ -29,9 +29,9 @@ Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 
 **文件**: `backend/services/crawler_service/database/models.py`
 
-爬虫内部 `user_id` 列全部是**被爬的社交平台用户**（微博UID/抖音UID等），**不是 MediaRadar 租户**。整个 `crawler_service` 数据库完全没有任何 MediaRadar tenant 标识。
+爬虫内部 `user_id` 列全部是**被爬的社交平台用户**（微博UID/抖音UID等），**不是 Omnis 租户**。整个 `crawler_service` 数据库完全没有任何 Omnis tenant 标识。
 
-后果：扫描结果进入 MediaRadar SQLite 时如何归属到 owner_id，**没有保证**。
+后果：扫描结果进入 Omnis SQLite 时如何归属到 owner_id，**没有保证**。
 
 ### F3. 触发链路全局化（严重跨用户串数据）
 
@@ -50,7 +50,7 @@ def run_crawler_for_platform(platform):
 
 **问题**：
 - `MONITOR_KEYWORDS` 是全局变量，**所有用户的关键词被合并后传给爬虫**
-- 单用户触发扫描 → 爬虫按全部用户的关键词一起抓 → 抓回的数据进入 MediaRadar SQLite 后**只能随机归属或全部归触发者**
+- 单用户触发扫描 → 爬虫按全部用户的关键词一起抓 → 抓回的数据进入 Omnis SQLite 后**只能随机归属或全部归触发者**
 - 即便在 SQLite 里按 owner_id 过滤，A 触发一次抓到的可能是 B 想要的词
 
 **优先级**: P0
@@ -62,7 +62,7 @@ def run_crawler_for_platform(platform):
 要修必须：
 1. 在 CLI 参数加 `--owner_id`（爬虫需改）
 2. 爬虫结果落 SQLite 时带 owner_id（爬虫需改）
-3. MediaRadar 拉取时按 owner_id 过滤（db_manager 已有 `get_unprocessed_posts`，需加 owner_id 透传）
+3. Omnis 拉取时按 owner_id 过滤（db_manager 已有 `get_unprocessed_posts`，需加 owner_id 透传）
 
 ### F5. `get_unprocessed_posts` 无 owner_id 参数
 

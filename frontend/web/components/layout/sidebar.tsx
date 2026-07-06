@@ -41,42 +41,42 @@ export function Sidebar() {
           <span className="material-symbols-outlined text-sm font-bold">chevron_right</span>
         </button>
 
-        {/* Brand */}
-        <div className={`mb-2 flex flex-col items-center justify-center overflow-hidden ${collapsed ? 'h-20' : 'h-24'}`}
-          style={{ transition: 'height 0.4s cubic-bezier(0.4, 0, 0.2, 1)' }}
-        >
-          {/* Logo — 等比缩放 */}
-          <div
-            className="flex items-center justify-center"
-            style={{
-              width: collapsed ? 52 : 72,
-              height: collapsed ? 28 : 38,
-              transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-          >
+        {/* Brand — 垂直不移动，只水平滑动 */}
+        <div className="overflow-hidden relative shrink-0" style={{
+          height: 90,
+        }}>
+          {/* Logo — top 固定不变，只有 left + translateX 水平过渡 */}
+          <div style={{
+            position: 'absolute',
+            left: collapsed ? '50%' : 16,
+            top: 24,
+            transform: collapsed ? 'translateX(-50%)' : 'translateX(0)',
+            width: collapsed ? 52 : 100,
+            height: collapsed ? 28 : 54,
+            transition: 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+          }}>
             <Image
               src="/logo.svg"
               alt="Omnis"
-              width={collapsed ? 52 : 72}
-              height={collapsed ? 28 : 38}
+              width={100}
+              height={54}
               priority
               unoptimized
-              style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
+              style={{ width: '100%', height: 'auto', display: 'block' }}
             />
           </div>
 
-          {/* V1.0.1 — logo 下方浮现/消失 */}
-          <div
-            className="flex items-center justify-center"
-            style={{
-              opacity: collapsed ? 0 : 1,
-              height: collapsed ? 0 : 18,
-              marginTop: collapsed ? 0 : 4,
-              transition: 'opacity 0.35s ease-out, height 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-top 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-          >
+          {/* V1.0.1 — logo 下方左侧，淡入/淡出 */}
+          <div style={{
+            position: 'absolute',
+            left: 16,
+            top: 62,
+            opacity: collapsed ? 0 : 1,
+            pointerEvents: collapsed ? 'none' : 'auto',
+            transition: 'opacity 0.3s ease',
+          }}>
             <span
-              className="text-[7px] label-caps px-1.5 py-0.5 rounded border shrink-0"
+              className="text-[7px] label-caps px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap"
               style={{ borderColor: 'oklch(0.78 0.16 85 / 0.3)', color: 'var(--primary-gold)' }}
             >
               {`v${pkg.version}`}

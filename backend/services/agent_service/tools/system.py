@@ -29,7 +29,7 @@ logger = get_logger("agent.tools.system")
 @with_owner
 def get_system_status(_owner_id: str) -> str:
     # 延迟 import 避免模块循环
-    from services.radar_service.main import get_radar_status
+    from services.platform_service.main import get_radar_status
 
     try:
         status = get_radar_status(owner_id=_owner_id)
@@ -128,10 +128,10 @@ def get_recent_alerts(limit: int = 5, _owner_id: str = "") -> str:
 def get_system_overview_tool(_owner_id: str) -> str:
     from datetime import datetime
 
-    from backend.core.model_config_db import AGENT_ROLES, get_effective_config
-    from backend.core.subscription_db import count_subscriptions
-    from services.radar_service.db_manager import get_all_push_configs
-    from services.radar_service.main import get_radar_status
+    from backend.shared.db.model_config_db import AGENT_ROLES, get_effective_config
+    from backend.shared.db.subscription_db import count_subscriptions
+    from services.platform_service.db import get_all_push_configs
+    from services.platform_service.main import get_radar_status
 
     # 雷达（v2.2 per-user：与 get_system_status 保持一致）
     try:
@@ -141,7 +141,7 @@ def get_system_overview_tool(_owner_id: str) -> str:
 
     # 调度器（apscheduler 可选依赖；缺则置空）
     try:
-        from services.radar_service.scheduler import scheduler_status
+        from services.platform_service.scheduler import scheduler_status
         sched = scheduler_status()
     except Exception as e:
         sched = {"active": False, "error": f"scheduler unavailable: {e}"}
@@ -232,7 +232,7 @@ def get_system_overview_tool(_owner_id: str) -> str:
 def get_recent_activity_tool(_owner_id: str, minutes: int = 60) -> str:
     from datetime import datetime, timedelta
 
-    from services.radar_service.db_manager import get_audit_log
+    from services.platform_service.db import get_audit_log
 
     if minutes < 5:
         minutes = 5
@@ -310,8 +310,8 @@ def get_recent_activity_tool(_owner_id: str, minutes: int = 60) -> str:
 )
 @with_owner
 def health_check_tool(_owner_id: str) -> str:
-    from backend.core.model_config_db import AGENT_ROLES, get_effective_config
-    from services.radar_service.db_manager import get_all_push_configs
+    from backend.shared.db.model_config_db import AGENT_ROLES, get_effective_config
+    from services.platform_service.db import get_all_push_configs
 
     components = []
 
@@ -327,7 +327,7 @@ def health_check_tool(_owner_id: str) -> str:
 
     # 2) Scheduler（apscheduler 可选）
     try:
-        from services.radar_service.scheduler import scheduler_status
+        from services.platform_service.scheduler import scheduler_status
         s = scheduler_status()
         components.append({
             "name": "scheduler",

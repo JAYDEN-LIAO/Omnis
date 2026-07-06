@@ -278,9 +278,9 @@ class LoggerFactory:
         today = datetime.now().strftime("%Y-%m-%d")
 
         # 根据 logger 前缀确定子目录
-        if logger_name.startswith("radar") or logger_name.startswith("radar_service"):
-            subdir = "radar"
-            filename = f"radar-{today}.log"
+        if logger_name.startswith("platform"):
+            subdir = "platform"
+            filename = f"platform-{today}.log"
         elif logger_name.startswith("crawler"):
             subdir = "crawler"
             filename = f"crawler-{today}.log"
@@ -383,7 +383,7 @@ def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
 # 保持向后兼容的默认 logger
 def get_default_logger() -> logging.Logger:
     """获取默认 logger（向后兼容）"""
-    return get_logger("MediaRadar")
+    return get_logger("Omnis")
 
 
 # 审计日志独立实例

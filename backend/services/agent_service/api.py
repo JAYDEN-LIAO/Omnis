@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend.core.auth_deps import get_current_user, require_registered_user
+from backend.services.auth_service.deps import get_current_user, require_registered_user
 from backend.core.logger import get_logger
 
 from .agent_core import chat_with_agent_stream, cancel_registry
@@ -164,7 +164,41 @@ async def cancel_agent_stream(
     return {"code": 200, "data": {"cancelled": cancelled}}
 
 
-# ==================== v2.0 P4: 工作流取消 ====================
+# ==================== v2.0 P4: 工作流列表 + 取消 ====================
+
+
+@router.get("/api/agent/workflows")
+async def list_workflows_endpoint(
+    current_user: Dict = Depends(get_current_user),
+):
+    """返回工作流列表（预设 + 当前用户的自动模板 + 用户自定义）"""
+    from backend.services.agent_service.workflows_db import WorkflowsDB
+    db = WorkflowsDB()
+    owner_id = str(current_user["id"])
+
+    # 预设工作流（is_composite_tool=1）
+    presets = db.query(
+        "SELECT id, name, description, source, created_at FROM workflows "
+        "WHERE source='preset' AND is_composite_tool=1 AND enabled=1 "
+        "ORDER BY id"
+    )
+
+    # 用户的工作流（auto_template + user）
+    user_workflows = db.query(
+        "SELECT id, name, description, source, schedule_cron, "
+        "last_run, run_count, enabled, created_at FROM workflows "
+        "WHERE (owner_id=? AND source IN ('user','auto_template')) "
+        "ORDER BY updated_at DESC LIMIT 20",
+        [owner_id],
+    )
+
+    return {
+        "code": 200,
+        "data": {
+            "presets": presets,
+            "user_workflows": user_workflows,
+        },
+    }
 
 
 @router.post("/api/agent/workflows/{workflow_id}/cancel")
@@ -186,7 +220,7 @@ async def cancel_workflow_endpoint(
     if wf["owner_id"] != owner_id and wf["owner_id"] != "system":
         raise HTTPException(status_code=403, detail={"code": 403, "msg": "无权操作他人工作流"})
 
-    from backend.services.radar_service.scheduler import _WF_CANCEL_EVENTS, _WF_CANCEL_LOCK
+    from .workflows_db import _WF_CANCEL_EVENTS, _WF_CANCEL_LOCK
     with _WF_CANCEL_LOCK:
         event = _WF_CANCEL_EVENTS.get(workflow_id)
         if event:

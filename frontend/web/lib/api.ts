@@ -1,5 +1,5 @@
 /**
- * MediaRadar Web 前端 API 客户端
+ * Omnis Web 前端 API 客户端
  * 后端路径: mediaradar.jaydennn.xyz (生产) / localhost:8008 (开发)
  */
 // 空字符串 = 同源请求（走 Next.js rewrite），不匹配时 fallback 到 localhost
@@ -77,16 +77,6 @@ export interface TopicListItem {
   is_processed: number;
 }
 
-export interface SystemSettings {
-  keywords: string[];
-  inactive_keywords: string[];
-  platforms: string[];
-  push_summary: boolean;
-  push_time: string;
-  alert_negative: boolean;
-  monitor_frequency: number;
-  start_time: string;
-}
 
 export interface PushConfig {
   enabled: boolean;
@@ -151,17 +141,6 @@ export const radarApi = {
     if (params?.limit) qs.set('limit', String(params.limit));
     return request<TopicListItem[]>(`/api/topic_list?${qs.toString()}`);
   },
-
-  startTask: () =>
-    request<{ msg: string }>('/api/start_task', { method: 'POST', body: '{}' }),
-
-  settings: () => request<SystemSettings>('/api/settings'),
-
-  saveSettings: (v: SystemSettings) =>
-    request<{ msg: string }>('/api/settings', {
-      method: 'POST',
-      body: JSON.stringify(v),
-    }),
 
   schedulerStart: () =>
     request<{ msg: string }>('/api/scheduler/start', { method: 'POST', body: '{}' }),
@@ -268,4 +247,21 @@ export const llmApi = {
       method: 'POST',
       body: JSON.stringify(config || {}),
     }),
+};
+
+export type WorkflowItem = {
+  id: number;
+  name: string;
+  description: string;
+  source: 'preset' | 'auto_template' | 'user';
+  schedule_cron?: string;
+  last_run?: string;
+  run_count?: number;
+  enabled?: number;
+  created_at?: string;
+};
+
+export const workflowApi = {
+  list: () =>
+    request<{ presets: WorkflowItem[]; user_workflows: WorkflowItem[] }>('/api/agent/workflows'),
 };

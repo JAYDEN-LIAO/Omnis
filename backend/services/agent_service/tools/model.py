@@ -14,7 +14,7 @@ import time
 from typing import Optional
 
 from backend.core.logger import get_logger
-from backend.core.model_config_db import (
+from backend.shared.db.model_config_db import (
     AGENT_ROLES,
     PROVIDERS,
     get_effective_config,

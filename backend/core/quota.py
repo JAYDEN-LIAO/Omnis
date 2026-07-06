@@ -10,8 +10,8 @@ v2.2：配额 FastAPI 中间件（依赖注入）
 """
 from fastapi import Depends, HTTPException, status
 
-from backend.core.auth_deps import get_current_user
-from backend.core.quota_db import check_quota
+from backend.services.auth_service.deps import get_current_user
+from backend.shared.db.quota_db import check_quota
 
 
 def enforce_quota(resource: str):

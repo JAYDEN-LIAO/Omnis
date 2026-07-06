@@ -324,7 +324,7 @@
   width: 0;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity 0.3s ease, width 0.3s ease;
+  transition: opacity 0.4s ease, width 0.4s ease;
 }
 .sidebar-expanded .sidebar-nav-label {
   opacity: 1;

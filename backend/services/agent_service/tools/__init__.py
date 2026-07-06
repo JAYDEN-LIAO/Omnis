@@ -22,7 +22,9 @@ from . import search  # noqa: F401  F 组 全网搜索
 from . import guide  # noqa: F401  F1 组 攻略查询
 from . import celebrity  # noqa: F401  F2 组 追星查询
 from . import briefing  # noqa: F401  F3 组 简报查询
-from . import atomic  # noqa: F401  H 组 原子工具
+from . import atomic_data  # noqa: F401  H1-H3 数据采集
+from . import atomic_analysis  # noqa: F401  H4-H9 分析工具
+from . import atomic_mgmt  # noqa: F401  H10-H12 管理工具
 from . import composite  # noqa: F401  I 组 组合工具
 
 # 注册完成后，调用 register_composite_tools() 把 preset 注册到 _REGISTRY

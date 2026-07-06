@@ -33,11 +33,11 @@ if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
 # 标准包导入
-from backend.services.radar_service.api import router as radar_router
+from backend.services.platform_service.api import router as radar_router
 from backend.services.agent_service.api import router as agent_router
 from backend.services.auth_service.api import router as auth_router  # WS4: 多用户认证
 from backend.services.subscription_service.api import router as subscription_router  # v2.2: 订阅/模型/配额/admin
-from backend.services.admin_service.api import router as admin_monitor_router  # Admin Agent 监控
+from backend.services.admin_service.api import router as admin_monitor_router, admin_users_router  # Admin Agent 监控 + 用户管理
 
 # 触发 agent_service加载，确保其 Counter/Histogram 已注册到 prometheus 默认注册表
 import backend.services.agent_service.agent_core  # noqa: F401
@@ -52,7 +52,7 @@ from backend.core.security_middleware import (
     add_max_body_size_middleware,
 )
 # v2.2: 触发订阅表初始化
-import backend.services.radar_service.db_manager  # noqa: F401  触发 init_radar_db
+import backend.services.platform_service.db  # noqa: F401  触发 init_radar_db
 logger = get_logger("gateway")
 
 
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
     app.state.scheduler_healthy = False
     app.state.scheduler_start_msg = "未启动"
     try:
-        from services.radar_service.scheduler import scheduler_start
+        from services.platform_service.scheduler import scheduler_start
         success, msg = scheduler_start()
         app.state.scheduler_healthy = bool(success)
         app.state.scheduler_start_msg = msg
@@ -82,9 +82,9 @@ async def lifespan(app: FastAPI):
 
     # 用户工作流调度器（每分钟检查 cron 到期）
     try:
-        from services.radar_service.scheduler import _run_user_workflows
+        from services.platform_service.scheduler import _run_user_workflows
         from apscheduler.triggers.interval import IntervalTrigger
-        from services.radar_service.scheduler import _scheduler as _wf_sched
+        from services.platform_service.scheduler import _scheduler as _wf_sched
         from apscheduler.schedulers.background import BackgroundScheduler
         # 获取或创建调度器
         _user_wf_scheduler = _wf_sched or BackgroundScheduler(timezone="Asia/Shanghai")
@@ -116,7 +116,7 @@ async def lifespan(app: FastAPI):
 
     # ── shutdown ──
     try:
-        from services.radar_service.scheduler import scheduler_stop
+        from services.platform_service.scheduler import scheduler_stop
         success, msg = scheduler_stop()
         if success:
             logger.info(f"[Gateway] {msg}")
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
 
     # Fix 3.4: 关闭全局 HTTP 客户端，避免 TCP 连接泄漏
     try:
-        from services.radar_service.llm_gateway import global_http_client
+        from services.platform_service.llm_gateway import global_http_client
         global_http_client.close()
         logger.info("[Gateway] 全局 HTTP 客户端已关闭")
     except Exception:
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MediaRadar 统一接口网关",
+    title="Omnis 统一接口网关",
     version="2.0",
     description="基于微服务架构的全局 API 网关",
     lifespan=lifespan,
@@ -214,6 +214,7 @@ app.include_router(radar_router, tags=["舆情雷达业务层"])
 app.include_router(agent_router, tags=["AI助手业务层"])
 app.include_router(auth_router, tags=["WS4 用户认证"])
 app.include_router(subscription_router, tags=["v2.2 订阅/模型/配额"])
+app.include_router(admin_users_router, tags=["Admin 用户管理"])
 app.include_router(admin_monitor_router, tags=["Admin Agent 监控"])
 
 
@@ -260,7 +261,7 @@ async def health_check():
 
     # Qdrant 连通性检查
     try:
-        from core.qdrant_client import get_qdrant_client
+        from backend.shared.qdrant_client import get_qdrant_client
         client = get_qdrant_client()
         client.get_collections()
         checks["qdrant"] = "ok"

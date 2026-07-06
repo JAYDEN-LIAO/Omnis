@@ -168,8 +168,6 @@ def _validate_jwt_secret():
 
 _validate_jwt_secret()
 
-from backend.core.agent_memory_db import init_db as _  # Agent 记忆库初始化
-
 
 # ── 多 Pipeline 模型解析 ──
 
@@ -243,7 +241,7 @@ def get_agent_config() -> tuple[str, str, str]:
 
 def get_agent_config_for_user(owner_id: str) -> tuple[str, str, str]:
     try:
-        from core.model_config_db import get_effective_config
+        from backend.shared.db.model_config_db import get_effective_config
         cfg = get_effective_config(owner_id, "AGENT")
         return (cfg.get("api_key", ""), cfg.get("base_url", ""), cfg.get("model", ""))
     except Exception:

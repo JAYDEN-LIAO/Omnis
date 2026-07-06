@@ -429,7 +429,7 @@ class AgentOpsEngine:
 
     async def _push_alerts(self, alerts: List[Dict]):
         try:
-            from backend.services.radar_service.notifier import send_alert
+            from backend.services.platform_service.notifier import send_alert
             for alert in alerts[:3]:
                 send_alert(
                     owner_id="admin",

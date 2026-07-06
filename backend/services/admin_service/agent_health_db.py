@@ -10,7 +10,7 @@ from backend.core.logger import get_logger
 
 logger = get_logger("admin.health_db")
 
-DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "agent_health.db"
+DB_PATH = Path(__file__).parent.parent.parent / "data" / "agent_health.db"
 
 
 class AgentHealthDB:

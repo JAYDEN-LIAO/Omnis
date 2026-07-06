@@ -8,9 +8,9 @@ import { authApi, radarApi } from '@/lib/api';
 import { isGuest } from '@/lib/auth-client';
 
 const pageTitles: Record<string, string> = {
-  '/agent': 'Omnis Agent',
-  '/dashboard': '总览仪表盘',
-  '/list': '入库信息',
+  '/agent': '信息助手',
+  '/workspace': '工作台',
+  '/dashboard': '数据看板',
   '/settings/system': '系统设置',
   '/settings/push': '推送设置',
   '/settings/llm': '模型配置',

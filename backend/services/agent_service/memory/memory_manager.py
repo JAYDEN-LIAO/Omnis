@@ -82,8 +82,8 @@ class AgentMemoryManager:
         if not owner_id:
             return ""
         try:
-            from backend.core.subscription_db import list_subscriptions
-            from backend.core.quota_db import get_scan_config
+            from backend.shared.db.subscription_db import list_subscriptions
+            from backend.shared.db.quota_db import get_scan_config
 
             subs = list_subscriptions(owner_id) if callable(list_subscriptions) else []
             scan = get_scan_config(owner_id) if callable(get_scan_config) else {}

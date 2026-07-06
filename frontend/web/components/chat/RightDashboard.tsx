@@ -5,12 +5,12 @@
  *
  * 模块：
  *   1. Risk Radar — SVG gauge（雷达状态）
- *   2. Hot Clusters — 热门话题/关键词
- *   3. Neural Engine — 调度器 + 快捷操作
+ *   2. Hot Clusters — 热门话题/关键词（真实数据）
+ *   3. System Status — 调度器 + 实时信息
  */
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
-import { radarApi } from '@/lib/api';
+import { radarApi, workflowApi } from '@/lib/api';
 
 interface Props {
   onQuickAction?: (text: string) => void;
@@ -29,8 +29,17 @@ export function RightDashboard({ onQuickAction }: Props) {
     refetchInterval: 60_000,
   });
 
-  const riskIndex = statusQ.data?.is_running ? 0.18 : 0.0;
-  const signalPct = statusQ.data?.is_running ? 75 : 0;
+  const workflowsQ = useQuery({
+    queryKey: ['workflows-right'],
+    queryFn: () => workflowApi.list(),
+    refetchInterval: 30_000,
+  });
+
+  const isRunning = statusQ.data?.is_running ?? false;
+  const totalCount = statusQ.data?.last_new_count ?? 0;
+  const summaryData = todayQ.data;
+  const presets = workflowsQ.data?.presets ?? [];
+  const userWfs = workflowsQ.data?.user_workflows ?? [];
 
   return (
     <>
@@ -38,18 +47,19 @@ export function RightDashboard({ onQuickAction }: Props) {
       <div className="p-6 border-b flex items-center justify-between" style={{ borderColor: 'rgba(0,0,0,0.05)' }}>
         <h3 className="serif-headline text-lg" style={{ color: 'var(--on-surface)' }}>智能实况</h3>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[9px] label-caps font-bold tracking-widest" style={{ color: '#059669' }}>脉冲活跃</span>
+          <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`} />
+          <span className="text-[9px] label-caps font-bold tracking-widest" style={{ color: isRunning ? '#059669' : 'var(--on-surface-faint)' }}>
+            {isRunning ? '运行中' : '待命中'}
+          </span>
         </div>
       </div>
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto scrollbar-hide p-6 space-y-8">
-        {/* Risk Radar */}
+        {/* Status gauge */}
         <section>
           <div className="flex justify-between items-center mb-4">
-            <span className="text-[10px] label-caps font-bold tracking-widest" style={{ color: 'var(--on-surface-variant)' }}>风险雷达</span>
-            <span className="text-[10px] label-caps" style={{ color: 'var(--on-surface-variant)', opacity: 0.5 }}>全球运营</span>
+            <span className="text-[10px] label-caps font-bold tracking-widest" style={{ color: 'var(--on-surface-variant)' }}>系统状态</span>
           </div>
           {statusQ.isLoading ? (
             <Skeleton className="w-32 h-32 mx-auto rounded-full" />
@@ -61,20 +71,20 @@ export function RightDashboard({ onQuickAction }: Props) {
                   className="gold-glow-ambient"
                   cx="18" cy="18" fill="none" r="16"
                   stroke="oklch(0.78 0.16 85)"
-                  strokeDasharray={`${signalPct}, 100`}
+                  strokeDasharray={`${isRunning ? 85 : 0}, 100`}
                   strokeLinecap="round"
                   strokeWidth="4"
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-lg font-bold data-mono">{riskIndex.toFixed(2)}</span>
-                <span className="text-[8px] label-caps tracking-widest" style={{ opacity: 0.4 }}>指数</span>
+                <span className="text-lg font-bold data-mono">{isRunning ? (totalCount || '—') : '0'}</span>
+                <span className="text-[8px] label-caps tracking-widest" style={{ opacity: 0.4 }}>新数据</span>
               </div>
             </div>
           )}
         </section>
 
-        {/* Hot Clusters */}
+        {/* Hot Clusters — 真实数据 */}
         <section>
           <h4 className="text-[10px] label-caps font-bold tracking-widest mb-4" style={{ color: 'var(--on-surface-variant)' }}>热门聚类</h4>
           {todayQ.isLoading ? (
@@ -82,51 +92,53 @@ export function RightDashboard({ onQuickAction }: Props) {
               <Skeleton className="h-20 w-full rounded-lg" />
               <Skeleton className="h-20 w-full rounded-lg" />
             </div>
-          ) : todayQ.data?.keyword ? (
+          ) : summaryData?.keyword ? (
             <div className="space-y-3">
               <div className="p-3 rounded-lg border border-white/10 transition-all cursor-pointer hover:scale-[1.01] group" style={{ background: 'rgba(255,255,255,0.2)' }}>
                 <div className="flex justify-between items-start mb-1">
                   <span className="text-xs font-bold transition-colors group-hover:text-[var(--primary-gold)]" style={{ color: 'var(--on-surface)' }}>
-                    {todayQ.data.keyword}
+                    {summaryData.keyword}
                   </span>
-                  <span className="text-[9px] data-mono" style={{ color: 'var(--primary-gold)' }}>+{todayQ.data.high_risk_count || 0}%</span>
+                  <span className="text-[9px] data-mono" style={{ color: 'var(--primary-gold)' }}>+{summaryData.high_risk_count || 0}</span>
                 </div>
-                {todayQ.data.summary && (
+                {summaryData.summary && (
                   <p className="text-[11px] leading-snug" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
-                    {todayQ.data.summary.slice(0, 80)}...
+                    {summaryData.summary.slice(0, 80)}...
                   </p>
                 )}
               </div>
-              <div className="p-3 rounded-lg border border-white/10 transition-all cursor-pointer hover:scale-[1.01] group" style={{ background: 'rgba(255,255,255,0.2)' }}>
-                <div className="flex justify-between items-start mb-1">
-                  <span className="text-xs font-bold transition-colors group-hover:text-[var(--primary-gold)]" style={{ color: 'var(--on-surface)' }}>
-                    能源转型
-                  </span>
-                  <span className="text-[9px] data-mono" style={{ color: 'var(--primary-gold)' }}>+8%</span>
-                </div>
-                <p className="text-[11px] leading-snug" style={{ color: 'var(--on-surface-variant)', opacity: 0.7 }}>
-                  可持续发展报告推动欧盟市场积极情绪。
-                </p>
-              </div>
+              {/* 没有硬编码第二项，如果没有数据就留空 */}
             </div>
           ) : (
-            <div className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.2)' }}>
-              <p className="text-xs" style={{ color: 'var(--on-surface-faint)' }}>暂无热点数据</p>
+            <div className="p-3 rounded-lg space-y-2" style={{ background: 'rgba(255,255,255,0.2)' }}>
+              <p className="text-xs font-semibold" style={{ color: 'var(--on-surface-variant)' }}>预设工作流</p>
+              <div className="flex flex-wrap gap-1.5">
+                {presets.slice(0, 4).map((wf) => (
+                  <span key={wf.id} className="px-2 py-1 text-[9px] label-caps rounded-full font-bold" style={{ background: 'oklch(0.78 0.16 85 / 0.12)', color: 'var(--on-surface-variant)' }}>
+                    {wf.name}
+                  </span>
+                ))}
+              </div>
+              {userWfs.length > 0 && (
+                <p className="text-[10px] mt-2" style={{ color: 'var(--on-surface-faint)' }}>
+                  {userWfs.length} 个运行/自定义工作流
+                </p>
+              )}
             </div>
           )}
         </section>
       </div>
 
-      {/* Neural Engine footer */}
+      {/* Footer — 真实系统信息 */}
       <div className="p-6 border-t" style={{ background: 'oklch(0.78 0.16 85 / 0.05)', borderColor: 'rgba(0,0,0,0.05)' }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-white/50 flex items-center justify-center border border-white/20 shadow-sm">
             <span className="material-symbols-outlined" style={{ color: 'var(--primary-gold)' }}>account_tree</span>
           </div>
           <div>
-            <p className="text-xs font-bold" style={{ color: 'var(--on-surface)' }}>神经引擎</p>
+            <p className="text-xs font-bold" style={{ color: 'var(--on-surface)' }}>数据概览</p>
             <p className="text-[10px] data-mono" style={{ color: 'var(--on-surface-variant)', opacity: 0.6 }}>
-              负载: {statusQ.data?.is_running ? '24.2' : '0'} tflops
+              {totalCount || 0} 条新数据 · {userWfs.length} 个工作流
             </p>
           </div>
         </div>

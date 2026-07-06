@@ -19,8 +19,8 @@ from typing import Optional
 
 from backend.core.database import get_db_connection
 from backend.core.logger import get_logger
-from backend.core.subscription_db import get_subscription_by_id
-from backend.services.radar_service.db_manager import (
+from backend.shared.db.subscription_db import get_subscription_by_id
+from backend.services.platform_service.db import (
     get_latest_results,
     get_topic_posts,
     get_topic_summary_by_id,

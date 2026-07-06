@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 
 const tabs = [
-  { title: '系统', href: '/settings/system' },
+  { title: '关于', href: '/settings/system' },
   { title: '推送', href: '/settings/push' },
   { title: '模型', href: '/settings/llm' },
   { title: '账号', href: '/settings/account' },

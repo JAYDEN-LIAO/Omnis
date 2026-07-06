@@ -74,8 +74,8 @@ async def web_search_tool(
     yield {"type": "progress", "platform": "_all", "scanned": 0, "query": query}
 
     try:
-        from services.search_lib.crawler_adapter import quick_crawl_stream
-        from services.search_lib.filter import filter_and_summarize
+        from services.agent_service.crawler_adapter import quick_crawl_stream
+        from services.agent_service.search_filter import filter_and_summarize
 
         async for partial in quick_crawl_stream(
             query=query,
