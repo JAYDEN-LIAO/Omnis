@@ -181,3 +181,6 @@ tests/unit/_tmp_memory.db
 backend/data/*.db
 backend/data/*.db-shm
 backend/data/*.db-wal
+
+# Claude Code 本地权限配置（不应入库；已跟踪时需 git rm --cached 移除，见 REFACTOR_ROADMAP #15）
+.claude/settings.local.json
