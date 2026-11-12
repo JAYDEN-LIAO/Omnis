@@ -69,7 +69,7 @@
 | 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 未开始 |
 | 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 未开始 |
 | 5 | P1 | 修复 22 处失效导入与 `ANALYST_*` 缺失 | 高 | 进行中 |
-| 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 未开始 |
+| 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 进行中 |
 | 7 | P1 | 统一前端鉴权链路 | 高 | 未开始 |
 | 8 | P1 | 部署配置归一化与 CI 原子发布 | 高 | 未开始 |
 | 9 | P2 | 补最小 smoke test 与 CI 质量门禁 | 高 | 未开始 |
@@ -224,6 +224,14 @@
 
 ### #6 修复前端构建链
 
+**2026-11-12 执行记录**
+
+- 已按锁文件执行 `npm ci`（`node_modules` 原缺失）。安装完成，但 npm 报告 **32 个既有安全告警**（1 low / 14 moderate / 13 high / 4 critical），依赖治理归 #10/#15，本项不擅自升级锁文件。
+- 基线实跑 `STATIC_EXPORT=true npm run build`：失败于 `app/layout.tsx` 的 `next/font/google` 构建期请求 `fonts.googleapis.com`。已移除构建期 Google 字体下载，保留现有浏览器字体回退。
+- 已给 `app/(app)/agent/page.tsx` 的 `useSearchParams()` 内容组件补 `<Suspense>`；已将 middleware 保护路径从不存在的 `/list`、`/yq-list` 修正为真实 `/workspace`。
+- 已删除 `next.config.ts` 的 `typescript.ignoreBuildErrors`；实测 `tsc --noEmit` 与 CI 同款静态导出构建均通过并产出 `out/`。
+- **未完成**：`npm run lint` 仍失败，存量 5 个 Hooks 条件调用错误（settings/llm 3 个、settings/push 2 个）与 23 个警告；这些属于 #9 恢复规则后的必修项。静态导出警告仍显示 middleware 在导出运行时被禁用；生产边缘鉴权与部署路径归 #7/#8 统一处理，本项不擅自改部署。
+
 **现状证据（构建失败为静态推断，需实跑确认）**
 
 - `.github/workflows/deploy.yml:28` `STATIC_EXPORT=true npm run build`；`frontend/web/next.config.ts:5-16` 因此走 `output: "export"`，`rewrites` 只在 else 分支生成。Next.js 静态导出不支持 Middleware / rewrites。
@@ -233,10 +241,10 @@
 
 **改造动作**
 
-- [ ] 本地实跑 `cd frontend/web && STATIC_EXPORT=true npm run build`，记录真实报错
-- [ ] 二选一：改回 `next start`（SSR）部署并保留 middleware；或静态站由 nginx 在边缘做鉴权。不要把 middleware 与 `output: export` 混用
-- [ ] 用 `<Suspense>` 包裹 `AgentPage`；修正 middleware 的保护路径清单
-- [ ] 关闭 `ignoreBuildErrors`，逐个修掉类型错误；`eslint-config-next` 对齐到 15.5.x（见 #15）
+- [x] 本地实跑 `cd frontend/web && STATIC_EXPORT=true npm run build`，记录真实报错（基线失败于 Google Fonts；修复后通过）
+- [ ] 二选一：改回 `next start`（SSR）部署并保留 middleware；或静态站由 nginx 在边缘做鉴权。不要把 middleware 与 `output: export` 混用（当前仍沿用 CI 静态导出，middleware 仅非静态模式有效；生产鉴权未闭环）
+- [x] 用 `<Suspense>` 包裹 `AgentPage`；修正 middleware 的保护路径清单
+- [x] 关闭 `ignoreBuildErrors`，逐个修掉类型错误（当前 `tsc --noEmit` 已通过；lint 的 5 个既有 Hooks 错误留待 #9/#14，不在本项顺手改）
 - [ ] CI 增加 `npm run lint && npm run type-check`（见 #9）
 
 **验收**：`STATIC_EXPORT=true npm run build` 成功产出 `out/`；`/admin` 未授权访问在所选方案下确实被拦截。
