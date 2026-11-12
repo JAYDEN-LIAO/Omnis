@@ -173,8 +173,9 @@ node_modules/
 out/
 
 # Log files
-logs/*.log
-logs/**/*.log
+# Runtime logs, including rotated suffixes such as *.log.2026-11-12
+logs/
+*.log.*
 tests/unit/_tmp_memory.db
 
 # SQLite database files

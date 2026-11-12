@@ -64,7 +64,7 @@
 
 | # | 批次 | 改造点 | 等级 | 状态 |
 |---|------|--------|------|------|
-| 1 | P0 | 清理已入库的登录态与运行日志 | 严重 | 未开始 |
+| 1 | P0 | 清理已入库的登录态与运行日志 | 严重 | 进行中 |
 | 2 | P0 | 封堵 SSRF 与系统 Key 外泄 | 严重 | 未开始 |
 | 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 未开始 |
 | 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 未开始 |
@@ -87,6 +87,15 @@
 
 ### #1 清理已入库的登录态与运行日志
 
+**2026-11-12 执行决策（负责人确认）**
+
+为避免立即影响爬虫登录功能，#1 拆分为两步执行：
+
+- **#1a 当前止损**：仅把已跟踪的 `backend/services/crawler_service/browser_data/` 与 `logs/` 从 Git 索引移出，本地文件保留，并补整目录忽略规则；不重写历史、不改爬虫 profile 路径。
+- **#1b 暂缓**：爬虫 profile 改临时目录、凭据轮换、远端历史重写评估后续再做。暂缓不表示风险消失；已进入远端历史的登录态仍应视为已泄露，恢复治理时必须处理。
+
+> #1a 不改变当前环境运行路径；后续新环境需要通过仓库外方式提供爬虫登录态，不能继续依赖 Git 分发 `browser_data/`。
+
 **现状证据**
 
 - `git ls-files | grep -c 'browser_data/'` = **258**，路径 `backend/services/crawler_service/browser_data/wb_user_data_dir/`，含 `Default/Network/Cookies`(57 KB)、`Default/Login Data`(51 KB)、`Default/History`(262 KB)、`Local State`；历史记录含微博 passport 与微信二维码登录 URL。
@@ -97,12 +106,14 @@
 
 **改造动作**
 
-- [ ] `git rm -r --cached backend/services/crawler_service/browser_data/` 与 `git rm -r --cached logs/`（需确认）
-- [ ] `.gitignore` 改为整目录 `logs/`、补 `*.log.*`；`browser_data/` 规则保留
-- [ ] 爬虫 profile 改为运行时临时目录，启动脚本不再复用已提交目录
-- [ ] 按 0.4 轮换全部相关凭据；远端历史重写单独评估
+- [x] #1a：`git rm -r --cached backend/services/crawler_service/browser_data/` 与 `git rm -r --cached logs/`（已确认后执行，本地文件保留）
+- [x] #1a：`.gitignore` 改为整目录 `logs/`、补 `*.log.*`；`browser_data/` 规则保留
+- [ ] #1b：爬虫 profile 改为运行时临时目录，启动脚本不再复用已提交目录（暂缓，避免影响现有登录态）
+- [ ] #1b：按 0.4 轮换全部相关凭据；远端历史重写单独评估（暂缓，风险仍存在）
 
-**验收**：`git ls-files | grep -c browser_data/` 与 `git ls-files logs | wc -l` 均为 0；`.gitignore` 覆盖 `*.log.*`；爬虫仍能以临时 profile 启动。
+**#1a 验收**：`git ls-files | grep -c browser_data/` 与 `git ls-files logs | wc -l` 均为 0；`.gitignore` 覆盖 `*.log.*`；本地 `browser_data/` 与 `logs/` 文件仍保留，爬虫现有路径不变。
+
+**#1 完成验收**：在 #1a 基础上，爬虫仍能以临时 profile 启动，且相关凭据已轮换；#1b 未完成前本项保持「进行中」。
 
 ---
 
