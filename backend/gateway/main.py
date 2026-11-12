@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
 
     # Fix 3.4: 关闭全局 HTTP 客户端，避免 TCP 连接泄漏
     try:
-        from services.platform_service.llm_gateway import global_http_client
+        from backend.services.agent_service.llm_gateway import global_http_client
         global_http_client.close()
         logger.info("[Gateway] 全局 HTTP 客户端已关闭")
     except Exception:

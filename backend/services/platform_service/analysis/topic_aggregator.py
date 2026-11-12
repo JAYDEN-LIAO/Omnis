@@ -19,7 +19,7 @@ from typing import List, Optional, TYPE_CHECKING
 from backend.core.logger import get_logger
 
 logger = get_logger("radar.aggregator")
-from .db import (
+from ..db import (
     create_or_update_topic_summary,
     add_posts_to_topic_batch,
 )
@@ -67,7 +67,7 @@ class TopicAggregator:
         """
         将单个 Cluster 聚合为一个话题记录。
         """
-        from .analysis.topic_tracker import build_topic_id
+        from .topic_tracker import build_topic_id
 
         topic_id = build_topic_id(cluster.keyword, cluster.topic_name)
 

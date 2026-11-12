@@ -109,7 +109,7 @@ class EmailNotifier(NotifierBase):
         """批量发送预警（合并为一封邮件）"""
         cfg = self._config
         try:
-            from ..push_generator import generate_batch_push_html
+            from ..push.generator import generate_batch_push_html
 
             # 生成批量 HTML
             if batch.email_html:

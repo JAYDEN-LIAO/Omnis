@@ -17,7 +17,7 @@ from backend.core.logger import get_logger
 
 logger = get_logger("radar.cluster")
 from backend.core.config import settings
-from .llm.gateway import call_llm, embedding_client
+from .llm_gateway import call_llm, embedding_client
 
 
 # 修复 #9.2：LRU 缓存（OrderedDict 容量 32）

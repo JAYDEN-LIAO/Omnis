@@ -30,6 +30,21 @@ class Settings:
                   or "deepseek-chat")
     DEFAULT_MODEL = _def_model
 
+    # ======== 配置2: 风险分析管线（回退: ANALYST/REVIEWER → DEFAULT）========
+    _analyst_api_key = os.getenv("ANALYST_API_KEY", "").strip() or _def_api_key
+    ANALYST_API_KEY = _analyst_api_key
+    _analyst_base_url = os.getenv("ANALYST_BASE_URL", "").strip() or _def_base_url
+    ANALYST_BASE_URL = _analyst_base_url
+    _analyst_model = os.getenv("ANALYST_MODEL", "").strip() or _def_model
+    ANALYST_MODEL = _analyst_model
+
+    _reviewer_api_key = os.getenv("REVIEWER_API_KEY", "").strip() or _def_api_key
+    REVIEWER_API_KEY = _reviewer_api_key
+    _reviewer_base_url = os.getenv("REVIEWER_BASE_URL", "").strip() or _def_base_url
+    REVIEWER_BASE_URL = _reviewer_base_url
+    _reviewer_model = os.getenv("REVIEWER_MODEL", "").strip() or _def_model
+    REVIEWER_MODEL = _reviewer_model
+
     # ======== AI 助手模型（回退: ASSISTANT → DEFAULT）========
     # 环境变量兼容 ASSISTANT_*（优先）和 AGENT_*（向后兼容）
     _assistant_api_key = os.getenv("ASSISTANT_API_KEY", "").strip() or os.getenv("AGENT_API_KEY", "").strip() or _def_api_key

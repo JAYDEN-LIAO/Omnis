@@ -55,9 +55,18 @@ class CircuitBreakerRegistry:
     def record_failure(self, tool_name: str):
         self.get(tool_name)._on_failure()
 
+    def get_all(self) -> list[CircuitBreaker]:
+        """返回全部已注册熔断器，供管理端状态查询使用。"""
+        return list(self._breakers.values())
+
 
 # 全局熔断器注册表
 _circuit_registry = CircuitBreakerRegistry()
+
+
+def get_all_breakers() -> list[CircuitBreaker]:
+    """Return all registered tool breakers for the admin circuit-state API."""
+    return _circuit_registry.get_all()
 
 
 class DiagnosisEngine:

@@ -68,7 +68,7 @@
 | 2 | P0 | 封堵 SSRF 与系统 Key 外泄 | 严重 | 未开始 |
 | 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 未开始 |
 | 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 未开始 |
-| 5 | P1 | 修复 22 处失效导入与 `ANALYST_*` 缺失 | 高 | 未开始 |
+| 5 | P1 | 修复 22 处失效导入与 `ANALYST_*` 缺失 | 高 | 进行中 |
 | 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 未开始 |
 | 7 | P1 | 统一前端鉴权链路 | 高 | 未开始 |
 | 8 | P1 | 部署配置归一化与 CI 原子发布 | 高 | 未开始 |
@@ -191,6 +191,14 @@
 
 ### #5 修复失效导入与缺失配置
 
+**2026-11-12 执行记录**
+
+- 已补回 `agent_service.llm_gateway` 最小兼容层（`call_llm` / `embedding_client` / `global_http_client`），继续使用现有 OpenAI-compatible 配置，不新增第三方依赖。
+- 已补回 `agent_service.analysis_graph` 的顺序式 analyst → reviewer → director 最小实现，保持原 Pipeline 期望的返回结构。
+- 已修复服务搬迁后残留的跨包导入、notifier / vector store / topic aggregator 断链，并为 `ANALYST_*`、`REVIEWER_*` 补齐 Settings 定义与 DEFAULT 回退。
+- 已验证：Python 3.11 `compileall` 通过；AST 扫描缺失导入目标为 0；用外部依赖替身导入 #5 涉及的 11 个真实内部模块全部成功；风险分析子图低风险 / 复核降级分支通过不打真实模型的检查。
+- **未验证**：未安装完整后端依赖，未真实启动服务，未调用真实 LLM、Screener/Cluster、`/api/circuit/states` 或话题 embedding；#5 不能标记完成。
+
 **现状证据（实证，非推断）**
 
 - `agent_service/pipeline.py:29-34` 顶层 `from .llm_gateway import call_llm`、`from .analysis_graph import analyze_and_report`、`from .llm.prompts import ...`、`from .analysis.topic_aggregator import ...`；已确认 `agent_service/` 下 `llm_gateway.py`、`analysis_graph.py`、`llm/`、`analysis/` **全部不存在**。
@@ -204,11 +212,11 @@
 
 **改造动作**
 
-- [ ] 先跑一次真实启动，列出全部 `ImportError`／`AttributeError` 清单（当前环境缺依赖，需先完成 #10 的依赖补齐）
-- [ ] 把残留的相对导入改为现存模块的绝对导入；被删功能明确标注 deprecated 或补回实现
-- [ ] 补齐 `ANALYST_*` 配置或改用现有 `get_effective_config()`
-- [ ] 清理 `pipeline.py` 文件头与 docstring 中的旧路径
-- [ ] `gateway/main.py:139` 改为正确模块，或删除该 shutdown 分支
+- [ ] 先跑一次真实启动，列出全部 `ImportError`／`AttributeError` 清单（当前环境缺依赖，需先完成 #10 的依赖补齐；本次未验证）
+- [x] 把断链导入改为指向现存模块；跨服务导入使用 `backend.*`，服务内既有相对导入不在本项批量改写（统一收敛仍归 #10）
+- [x] 补齐 `ANALYST_*` 配置或改用现有 `get_effective_config()`（本次补齐 Settings 字段并回退 DEFAULT；同时补齐 REVIEWER）
+- [x] 清理 `pipeline.py` 文件头与 docstring 中的旧路径
+- [x] `gateway/main.py:139` 改为正确模块，或删除该 shutdown 分支
 
 **验收**：启动后逐一调用 Screener/Cluster 工具、`/api/circuit/states`、话题 embedding，无 ImportError；静态扫描相对导入断链数为 0。
 

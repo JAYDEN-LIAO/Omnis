@@ -48,7 +48,7 @@ def get_circuit_states(current_user: dict = Depends(require_admin)):
     """
     返回所有熔断器当前状态（v2.2：需认证）
     """
-    from .llm.gateway import get_all_breakers
+    from backend.services.agent_service.diagnosis.diagnosis_engine import get_all_breakers
     breakers = get_all_breakers()
     breaker_dicts = [b.to_dict() for b in breakers]
     summary = {
