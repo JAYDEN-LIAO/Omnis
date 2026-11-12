@@ -7,22 +7,8 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     rules: {
-      // shadcn/ui 内部使用了 Math.random 等不纯函数，禁用此类规则避免修改三方代码
-      "react-hooks/purity": "off",
-      "react-hooks/incompatible-library": "off",
-      "react-hooks/refs": "off",
-      "react-hooks/error-boundaries": "off",
-      "react-hooks/static-components": "off",
+      // #9 分批恢复 Hooks 规则：先保留两个存量模式例外，其余规则已恢复。
       "react-hooks/set-state-in-effect": "off",
-      "react-hooks/set-state-in-render": "off",
-      "react-hooks/component-hook-factories": "off",
-      "react-hooks/globals": "off",
-      "react-hooks/immutability": "off",
-      "react-hooks/preserve-manual-memoization": "off",
-      "react-hooks/missing-key-in-loop": "off",
-      "react-hooks/unsupported-syntax": "off",
-      "react-hooks/incompatible-library": "off",
-      "react-hooks/use-memo": "off",
       "react-hooks/preserve-manual-memoization": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },

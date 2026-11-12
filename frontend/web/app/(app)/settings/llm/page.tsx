@@ -26,13 +26,14 @@ const INPUT_CLASS =
   'w-full bg-white/70 border border-[color:var(--border-faint)] focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.15)] rounded-lg px-3 py-2 text-sm transition-all outline-none';
 
 export default function LLMSettingsPage() {
-  // 游客拦截
-  if (isGuest()) {
-    return <GuestBlock feature="模型配置" />;
-  }
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['llm-configs'], queryFn: () => llmApi.configs() });
   const [revealKey, setRevealKey] = useState<Record<string, boolean>>({});
+
+  // 游客拦截：Hooks 必须先稳定执行，再按身份切换展示
+  if (isGuest()) {
+    return <GuestBlock feature="模型配置" />;
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto">

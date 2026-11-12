@@ -42,16 +42,17 @@ const INPUT_CLASS =
   'w-full px-4 py-3 rounded-lg bg-white/70 border-[0.5px] border-[color:var(--border-faint)] focus:outline-none focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.2)] transition-all text-sm text-[color:var(--on-surface)] placeholder:text-[color:var(--on-surface-variant)]/40';
 
 export default function PushSettingsPage() {
-  // 游客拦截
-  if (isGuest()) {
-    return <GuestBlock feature="推送设置" />;
-  }
   const [activeTab, setActiveTab] = useState<string>('email');
 
   const { data: configs, isLoading } = useQuery({
     queryKey: ['push-configs'],
     queryFn: () => pushApi.configs(),
   });
+
+  // 游客拦截：Hooks 必须先稳定执行，再按身份切换展示
+  if (isGuest()) {
+    return <GuestBlock feature="推送设置" />;
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto">

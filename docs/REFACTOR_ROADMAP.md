@@ -72,7 +72,7 @@
 | 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 进行中 |
 | 7 | P1 | 统一前端鉴权链路 | 高 | 未开始 |
 | 8 | P1 | 部署配置归一化与 CI 原子发布 | 高 | 未开始 |
-| 9 | P2 | 补最小 smoke test 与 CI 质量门禁 | 高 | 未开始 |
+| 9 | P2 | 补最小 smoke test 与 CI 质量门禁 | 高 | 进行中 |
 | 10 | P2 | 依赖清单与 Python 包边界 | 中 | 未开始 |
 | 11 | P2 | 限流失效、中间件顺序、请求体限制 | 中 | 未开始 |
 | 12 | P2 | 异常回显、日志脱敏、管理端点暴露 | 中 | 未开始 |
@@ -298,6 +298,14 @@
 
 ### #9 补最小 smoke test 与 CI 质量门禁
 
+**2026-11-12 执行记录（本地质量基线，不改部署层）**
+
+- 已新增 `pytest.ini` 与 `tests/`，当前 5 个最小 smoke test 覆盖：后端内部导入目标存在、gateway 可导入并注册核心路由、LLM JSON 解析、`ANALYST_*` 回退配置、风险分析 reviewer 降级分支。
+- 已修复 settings/llm 与 settings/push 的 5 个 Hooks 条件调用错误；`npm run lint` 退出码 0（剩余 25 个 warning）。
+- 已恢复大部分 `react-hooks/*` 规则；仅保留两个存量模式例外：`set-state-in-effect` 与 `preserve-manual-memoization`，后续清零后再移除。
+- 实测：`python -m compileall -q backend tests` 通过；`python -m pytest -q` 为 **5 passed, 3 warnings**；`npm run type-check` 通过；`npm run lint` 通过（0 error / 25 warning）；`STATIC_EXPORT=true npm run build` 通过。
+- **未做**：按负责人确认的边界，未修改 `.github/workflows/deploy.yml`、CI、Nginx、Docker 或部署脚本；#9 不能标记完成。
+
 **现状证据**
 
 - 全仓 **0 个测试文件**：无 `tests/`、`test_*.py`、`conftest.py`、`pytest.ini`、`pyproject.toml`、`smoke_test.py`；`requirements-dev.txt` 声明了 pytest 系列却无用例。
@@ -317,8 +325,8 @@
 
 **改造动作**
 
-- [ ] 建 `tests/` 与 pytest 配置，先写「导入链 + 关键端点」最小 smoke test（覆盖 #5 的断链与 #3 的启动校验）
-- [ ] 前端补 `npm run lint` / `type-check` 脚本并恢复 react-hooks 规则
+- [x] 建 `tests/` 与 pytest 配置，先写「导入链 + 关键端点」最小 smoke test（已覆盖 #5 断链与 gateway 核心路由；#3 启动校验仍待补）
+- [ ] 前端补 `npm run lint` / `type-check` 脚本并恢复 react-hooks 规则（脚本已有；5 个 Hooks error 已清零，大部分规则已恢复，仍有 2 个存量例外与 25 个 warning）
 - [ ] CI 增加门禁：`pytest` + `npm run lint` + `npm run type-check`，失败即阻止部署
 - [ ] 把 `功能清单与验证.md` 里的关键路径逐步固化为自动化用例
 
