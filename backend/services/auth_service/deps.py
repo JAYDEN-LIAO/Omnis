@@ -37,7 +37,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = decode_token(token)
+    payload = decode_token(token, expected_type="access")
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -78,7 +78,7 @@ async def get_optional_user(
     token = _extract_bearer(authorization)
     if not token:
         return None
-    payload = decode_token(token)
+    payload = decode_token(token, expected_type="access")
     if not payload:
         return None
     user_id = payload.get("sub")
@@ -117,7 +117,7 @@ async def get_current_user_or_api_key(
     # 先试 JWT
     token = _extract_bearer(authorization)
     if token:
-        payload = decode_token(token)
+        payload = decode_token(token, expected_type="access")
         if payload:
             user_id = payload.get("sub")
             if user_id:

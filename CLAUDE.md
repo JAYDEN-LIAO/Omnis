@@ -135,4 +135,4 @@ backend/
 5. **推送通道**: `platform_service/notifier/`，支持企业微信/飞书/邮箱/RSS，Agent 通过 `push_report` 工具触发
 6. **模型配置**: 每个 Agent 角色可单独配置，未配置时回退到 DEFAULT 模型
 7. **调度器**: `platform_service/scheduler.py` 仅执行用户 cron 工作流 + 每日记忆清理，不自动扫描
-8. **邀请码**: 新用户无系统 Key 权限，需在模型设置页输入 `KSKBL1027` 兑换
+8. **邀请码**: 新用户无系统 Key 权限，需在模型设置页输入部署时生成的有限次邀请码兑换

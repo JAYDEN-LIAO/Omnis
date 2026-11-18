@@ -2,6 +2,8 @@
 """push_settings 表操作 + suppressed push"""
 import json
 import datetime
+import secrets
+import sqlite3
 from typing import Optional
 
 from backend.core.database import get_db_connection
@@ -39,6 +41,32 @@ def _ensure_push_settings_table():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_push_settings_owner ON push_settings(owner_id)')
+        cursor.execute('''
+            UPDATE push_settings
+            SET config_json = json_set(config_json, '$.access_token', '')
+            WHERE channel = 'rss'
+              AND json_type(config_json, '$.access_token') = 'text'
+              AND length(json_extract(config_json, '$.access_token')) < 32
+        ''')
+        cursor.execute('''
+            UPDATE push_settings
+            SET config_json = json_set(config_json, '$.access_token', '')
+            WHERE channel = 'rss'
+              AND json_extract(config_json, '$.access_token') IN (
+                  SELECT json_extract(config_json, '$.access_token')
+                  FROM push_settings
+                  WHERE channel = 'rss'
+                  GROUP BY json_extract(config_json, '$.access_token')
+                  HAVING COUNT(*) > 1
+              )
+        ''')
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_push_rss_access_token
+            ON push_settings(json_extract(config_json, '$.access_token'))
+            WHERE channel = 'rss'
+              AND json_extract(config_json, '$.access_token') IS NOT NULL
+              AND json_extract(config_json, '$.access_token') <> ''
+        ''')
         conn.commit()
 
 
@@ -79,6 +107,29 @@ def save_push_config(owner_id: str, channel: str, config: dict) -> None:
         conn.commit()
 
 
+def ensure_rss_access_token(owner_id: str, config: dict) -> Optional[str]:
+    """为当前用户保留或生成唯一强随机 RSS token，拒绝客户端指定值。"""
+    _ensure_push_settings_table()
+    current = config.get("access_token")
+    if isinstance(current, str) and len(current) >= 32:
+        existing_owner = get_owner_by_rss_token(current)
+        if existing_owner == owner_id:
+            return current
+
+    for _ in range(5):
+        token = secrets.token_urlsafe(32)
+        if get_owner_by_rss_token(token) is not None:
+            continue
+        candidate = {**config, "access_token": token}
+        try:
+            save_push_config(owner_id, "rss", candidate)
+            return token
+        except sqlite3.IntegrityError:
+            continue
+    logger.error("[push_settings] RSS token 生成冲突次数超限")
+    return None
+
+
 def get_all_push_configs(owner_id: Optional[str] = None) -> dict[str, dict]:
     """返回某用户的所有推送通道配置（v2.2：per-owner）
     owner_id=None 时返回全部（admin 视角）"""
@@ -114,17 +165,15 @@ def get_all_push_configs(owner_id: Optional[str] = None) -> dict[str, dict]:
 
 
 def get_owner_by_rss_token(token: str) -> Optional[str]:
-    """根据 RSS token 查找 owner_id"""
-    import re
-
-    safe_token = re.sub(r'([%_])', r'\\\1', token)
+    """根据 RSS token 精确查找 owner_id，禁止 JSON 子串匹配。"""
     _ensure_push_settings_table()
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT owner_id FROM push_settings WHERE channel = 'rss' AND config_json LIKE ? ESCAPE '\\'",
-            (f'%{safe_token}%',),
+            "SELECT owner_id FROM push_settings "
+            "WHERE channel = 'rss' AND json_extract(config_json, '$.access_token') = ?",
+            (token,),
         )
         row = cursor.fetchone()
 

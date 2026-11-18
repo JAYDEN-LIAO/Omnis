@@ -76,15 +76,15 @@ def start_task(background_tasks: BackgroundTasks, current_user: dict = Depends(g
 # ============================================================
 
 @router.post("/api/scheduler/start")
-def start_scheduler(current_user: dict = Depends(require_registered_user)):
+def start_scheduler(current_user: dict = Depends(require_admin)):
     from .scheduler import scheduler_start
     success, msg = scheduler_start()
     return {"code": 200, "msg": msg} if success else {"code": 400, "msg": msg}
 
 
 @router.post("/api/scheduler/stop")
-def stop_scheduler(current_user: dict = Depends(require_registered_user)):
-    """停止定时调度器（v2.2：需认证）"""
+def stop_scheduler(current_user: dict = Depends(require_admin)):
+    """停止全局调度器（仅 admin）"""
     from .scheduler import scheduler_stop
     success, msg = scheduler_stop()
     return {"code": 200, "msg": msg}
@@ -657,7 +657,12 @@ def save_push_config(channel: str, req: PushConfigUpdateRequest, current_user: d
             "to_addrs": req.to_addrs,
         })
     elif channel == "rss":
-        cfg["access_token"] = req.webhook_url or ""
+        from .db.db_push import ensure_rss_access_token
+
+        access_token = ensure_rss_access_token(current_user["id"], cfg)
+        if not access_token:
+            return {"code": 500, "msg": "RSS token 生成失败，请稍后重试"}
+        cfg["access_token"] = access_token
     else:
         cfg["webhook_url"] = req.webhook_url
 

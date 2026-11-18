@@ -61,6 +61,10 @@
 
 ## 2. 认证模块（新增）
 
+### 2.0 Token 类型约束
+- 受保护的 `/api/*` 端点只接受 `type=access` 的 Bearer token
+- `type=refresh` token 仅能调用 `/api/auth/refresh`，不能访问其他业务端点
+
 ### 2.1 第三方登录（OAuth）
 ```
 GET /api/auth/oauth/{provider}/login
@@ -103,6 +107,16 @@ Authorization: Bearer <token>
 ```
 - 响应：`{"code": 200, "msg": "已登出", "data": null}`
 - 副作用：服务端将 token 加入黑名单（24h TTL）
+
+### 2.5 邀请码
+```
+POST /api/auth/redeem-invite
+GET  /api/auth/invite-status
+Authorization: Bearer <access-token>
+```
+- 邀请码必须在部署或管理流程中显式生成，不再内置公开默认码
+- 每个邀请码必须有有限 `max_uses`；兑换使用原子条件更新扣减
+- 同一用户对同一邀请码只能兑换一次
 
 ---
 
@@ -243,6 +257,15 @@ DELETE /api/agent/sessions/{session_id}
 - 每个用户独立配置推送通道
 - 端点不变，加 `owner_id` 过滤
 
+### 6.2 RSS Token
+```
+POST /api/push/config/rss
+GET  /rss/{access_token}.xml
+```
+- RSS `access_token` 由服务端生成，客户端传入值不生效
+- token 至少 32 个随机字符，并在数据库层保证唯一
+- RSS owner 查找使用 `json_extract(config_json, '$.access_token') = ?` 精确匹配
+
 ---
 
 ## 7. LLM 配置（v1 → v2 改造）
@@ -269,6 +292,8 @@ POST /api/scheduler/start
 POST /api/scheduler/stop
 GET  /api/scheduler/status
 ```
+- `start` / `stop` 影响 APP 全局调度器，仅 `admin` 可调用
+- `status` 仅要求已认证用户
 
 ---
 
