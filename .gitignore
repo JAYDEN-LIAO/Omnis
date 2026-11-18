@@ -173,14 +173,18 @@ node_modules/
 out/
 
 # Log files
-logs/*.log
-logs/**/*.log
+# Runtime logs, including rotated suffixes such as *.log.2026-11-12
+logs/
+*.log.*
 tests/unit/_tmp_memory.db
 
 # SQLite database files
 backend/data/*.db
 backend/data/*.db-shm
 backend/data/*.db-wal
+
+# WorkBuddy 本地工作数据（记忆与会话缓存，不入库）
+.workbuddy/
 
 # Claude Code 本地权限配置（不应入库；已跟踪时需 git rm --cached 移除，见 REFACTOR_ROADMAP #15）
 .claude/settings.local.json

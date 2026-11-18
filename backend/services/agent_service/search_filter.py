@@ -47,7 +47,7 @@ async def filter_and_summarize(post: dict, query: str) -> Optional[dict]:
     summary = (post.get("content", "") or "")[:80]
 
     try:
-        from ..platform_service.llm_gateway import call_llm
+        from .llm_gateway import call_llm
 
         res = await asyncio.to_thread(
             call_llm,

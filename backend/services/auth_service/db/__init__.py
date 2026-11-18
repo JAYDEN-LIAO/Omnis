@@ -5,6 +5,7 @@ WS4: 用户与认证相关表（users / user_settings / token_blacklist）
 """
 import sqlite3
 import uuid
+import secrets
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -54,15 +55,47 @@ def _migrate_add_system_access_column():
         conn.commit()
 
 
-def _migrate_existing_users_access():
-    """迁移：为所有已有用户开放系统 Key 权限（存量用户默认信任）"""
+def migrate_existing_users_access_once() -> bool:
+    """显式执行一次性历史提权迁移；不得挂在应用启动流程上。"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auth_schema_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute(
+            "SELECT 1 FROM auth_schema_migrations WHERE name = ?",
+            ("legacy_users_system_access_grant",),
+        )
+        if cursor.fetchone():
+            conn.commit()
+            return False
         cursor.execute("UPDATE users SET has_system_access = 1 WHERE has_system_access IS NULL OR has_system_access = 0")
+        affected = cursor.rowcount
+        cursor.execute(
+            "INSERT INTO auth_schema_migrations (name) VALUES (?)",
+            ("legacy_users_system_access_grant",),
+        )
+        conn.commit()
+        if affected:
+            logger.info(f"[AuthDB] 一次性迁移: {affected} 个存量用户已获得系统 Key 权限")
+        return True
+
+
+def _disable_unlimited_invite_codes() -> None:
+    """停用历史遗留的无限次邀请码，避免公开码继续绕过配额。"""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE invite_codes SET is_active = 0 "
+            "WHERE is_active = 1 AND (max_uses IS NULL OR max_uses <= 0)"
+        )
         affected = cursor.rowcount
         conn.commit()
     if affected:
-        logger.info(f"[AuthDB] 迁移: {affected} 个存量用户已获得系统 Key 权限")
+        logger.warning(f"[AuthDB] 已停用 {affected} 个无限次邀请码")
 
 
 def init_auth_tables():
@@ -118,14 +151,20 @@ def init_auth_tables():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS invite_codes (
                 code TEXT PRIMARY KEY,
-                max_uses INTEGER DEFAULT 0,
-                current_uses INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
+                max_uses INTEGER NOT NULL DEFAULT 1 CHECK (max_uses > 0),
+                current_uses INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_invite_codes_active ON invite_codes(is_active)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auth_schema_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
         # 邀请码兑换记录表
         cursor.execute('''
@@ -138,12 +177,22 @@ def init_auth_tables():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_redemptions_user ON invite_redemptions(user_id)')
+        cursor.execute('''
+            DELETE FROM invite_redemptions
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM invite_redemptions
+                GROUP BY user_id, code
+            )
+        ''')
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_redemptions_user_code
+            ON invite_redemptions(user_id, code)
+        ''')
 
         conn.commit()
     _migrate_add_password_column()
     _migrate_add_system_access_column()
-    _migrate_existing_users_access()
-    _seed_invite_codes()
+    _disable_unlimited_invite_codes()
     logger.info("[AuthDB] 所有认证相关表已就绪")
 
 
@@ -455,19 +504,22 @@ def cleanup_expired_blacklist() -> int:
 
 # ==================== 邀请码系统 ====================
 
-INVITE_CODE_PRESET = "KSKBL1027"
+def create_invite_code(max_uses: int = 1, created_by: str = "system") -> str:
+    """部署或管理员流程显式生成有限次邀请码。"""
+    if max_uses <= 0:
+        raise ValueError("邀请码必须设置有限使用次数")
 
-
-def _seed_invite_codes():
-    """初始化预设邀请码（幂等）"""
-    now = datetime.now().isoformat()
+    code = f"OMNI-{secrets.token_hex(8).upper()}"
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR IGNORE INTO invite_codes (code, max_uses, current_uses, is_active, created_at, created_by)
-            VALUES (?, 0, 0, 1, ?, 'system')
-        ''', (INVITE_CODE_PRESET, now))
+        cursor.execute(
+            "INSERT INTO invite_codes "
+            "(code, max_uses, current_uses, is_active, created_at, created_by) "
+            "VALUES (?, ?, 0, 1, ?, ?)",
+            (code, max_uses, datetime.now().isoformat(), created_by),
+        )
         conn.commit()
+    return code
 
 
 def get_user_system_access(user_id: str) -> bool:
@@ -514,7 +566,9 @@ def redeem_invite_code(code: str, user_id: str) -> tuple[bool, str]:
         max_uses, current_uses, is_active = row
         if not is_active:
             return False, "邀请码已停用"
-        if max_uses > 0 and current_uses >= max_uses:
+        if max_uses is None or max_uses <= 0:
+            return False, "邀请码已被停用"
+        if current_uses >= max_uses:
             return False, "邀请码已被用完"
 
         # 检查该用户是否已兑换过
@@ -531,22 +585,39 @@ def redeem_invite_code(code: str, user_id: str) -> tuple[bool, str]:
         if user_row and user_row[0]:
             return False, "你已拥有系统 Key 权限，无需重复兑换"
 
-        # 增加使用次数
+        if not user_row:
+            return False, "用户不存在"
+
+        # 原子扣减可用次数，防止并发兑换超出 max_uses
         cursor.execute(
-            "UPDATE invite_codes SET current_uses = current_uses + 1 WHERE code = ?",
+            "UPDATE invite_codes SET current_uses = current_uses + 1 "
+            "WHERE code = ? AND is_active = 1 AND max_uses > 0 AND current_uses < max_uses",
             (code,),
         )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return False, "邀请码已被用完"
+
         # 记录兑换
-        cursor.execute(
-            "INSERT INTO invite_redemptions (user_id, code) VALUES (?, ?)",
-            (user_id, code),
-        )
+        try:
+            cursor.execute(
+                "INSERT INTO invite_redemptions (user_id, code) VALUES (?, ?)",
+                (user_id, code),
+            )
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False, "该邀请码已被你使用过"
+
         # 开通权限
         cursor.execute(
-            "UPDATE users SET has_system_access = 1 WHERE id = ?",
+            "UPDATE users SET has_system_access = 1 "
+            "WHERE id = ? AND (has_system_access IS NULL OR has_system_access = 0)",
             (user_id,),
         )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return False, "邀请码兑换失败，请稍后重试"
         conn.commit()
 
-    logger.info(f"[AuthDB] 邀请码兑换成功: user={user_id[:8]}... code={code}")
+    logger.info(f"[AuthDB] 邀请码兑换成功: user={user_id[:8]}... code={code[:4]}***")
     return True, "邀请码兑换成功，已开通系统 Key 权限"

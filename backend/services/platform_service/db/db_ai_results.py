@@ -13,7 +13,7 @@ logger = get_logger("radar.db")
 def _async_index_to_qdrant(result: dict):
     """异步将 ai_results 写入 Qdrant（不阻塞主流程）"""
     try:
-        from ..vector_store import index_ai_result
+        from ..analysis.vector_store import index_ai_result
         index_ai_result(result)
         logger.info(f"[RAG Index] post_id={result['post_id']} 已写入 Qdrant")
     except Exception as e:

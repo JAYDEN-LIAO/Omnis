@@ -42,7 +42,7 @@ cd frontend/web && npm run dev
 - **Workspace**: Preset workflows, recent runs, user-defined cron workflows
 - **Dashboard**: System overview, data source distribution, activity feed
 - **Smart Alerts**: Multi-channel push via email, WeCom, Feishu, RSS
-- **Invite System**: New users need invite code `KSKBL1027` to unlock system API keys
+- **Invite System**: Operators generate finite-use invite codes during deployment to unlock system API keys
 - **Security**: TLS 1.2+, CSP headers, encrypted API keys, brute force protection
 
 ## Directory Structure

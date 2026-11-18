@@ -47,9 +47,10 @@ def _get_fernet() -> Optional[object]:
             logger.warning("[Crypto] DB_ENCRYPTION_KEY 格式无效，忽略")
             key_b64 = ""
 
-    # 2. 从 JWT_SECRET 推导（保证同部署可解密）
+    # 2. 从 settings.JWT_SECRET 推导（dev 自动生成的临时密钥同样可见，保证同部署可解密）
     if not key_b64:
-        jwt_secret = os.getenv("JWT_SECRET", "") or ""
+        from backend.core.config import settings
+        jwt_secret = settings.JWT_SECRET or ""
         if jwt_secret:
             derived = hashlib.sha256(jwt_secret.encode("utf-8")).digest()
             key_b64 = base64.urlsafe_b64encode(derived).decode()
@@ -71,16 +72,21 @@ def _get_fernet() -> Optional[object]:
 
 
 def encrypt_api_key(plaintext: str) -> str:
-    """加密 API Key。失败时返回原文（不阻塞写入）。"""
+    """加密 API Key。prod 缺少密钥时拒绝明文落库（fail-closed，ref #3）。"""
     if not plaintext:
         return plaintext
     f = _get_fernet()
     if f is None:
-        return plaintext  # 无法加密 → 存明文（降级）
+        if os.getenv("ENV", "dev").lower() == "prod":
+            raise RuntimeError("[Crypto] 生产环境缺少加密密钥，拒绝以明文存储凭据")
+        logger.warning("[Crypto] 无可用加密密钥，dev 模式降级为明文存储")
+        return plaintext
     try:
         return f.encrypt(plaintext.encode("utf-8")).decode()
-    except Exception as e:
-        logger.error(f"[Crypto] 加密失败: {e}")
+    except Exception:
+        if os.getenv("ENV", "dev").lower() == "prod":
+            raise RuntimeError("[Crypto] 生产环境加密失败，拒绝以明文存储凭据")
+        logger.error("[Crypto] 加密失败，dev 模式降级为明文存储")
         return plaintext
 
 
@@ -95,12 +101,14 @@ def decrypt_api_key(ciphertext: str) -> str:
 
     f = _get_fernet()
     if f is None:
-        return ciphertext  # 无法解密 → 返回原文
+        logger.warning("[Crypto] 无可用密钥，返回空值以避免密文被当明文使用")
+        return ""
     try:
         return f.decrypt(ciphertext.encode("utf-8")).decode()
-    except Exception as e:
-        logger.warning(f"[Crypto] 解密失败（可能是旧明文数据），返回原文: {e}")
-        return ciphertext
+    except Exception:
+        # 不把密文当明文返回，避免密文被当作 Key 发出去（ref #3）
+        logger.warning("[Crypto] 解密失败，返回空值")
+        return ""
 
 
 def encrypt_dict_api_key(cfg: dict) -> dict:

@@ -51,7 +51,7 @@ def ensure_topic_collection_exists():
     幂等创建 topic_evolution 集合。
     代理到 vector_store.py 的同名函数（复用同一 Qdrant 实例）。
     """
-    from .analysis.vector_store import ensure_topic_collection_exists as _ensure
+    from .vector_store import ensure_topic_collection_exists as _ensure
     _ensure()
 
 
@@ -63,7 +63,7 @@ def _embed_texts_for_topic(texts: list[str]) -> list[list[float]]:
     """
     调用 BGE-M3 对文本列表生成向量（话题检索用）。
     """
-    from .llm.gateway import embedding_client
+    from backend.services.agent_service.llm_gateway import embedding_client
 
     resp = embedding_client.embeddings.create(
         input=texts,

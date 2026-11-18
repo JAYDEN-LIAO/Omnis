@@ -1,6 +1,6 @@
-# backend/services/platform_service/pipeline.py
+# backend/services/agent_service/pipeline.py
 """
-Radar Pipeline 调度器
+Agent analysis pipeline scheduler
 
 将爬虫数据处理流程编排为五个可组合阶段：
   ① ScreenerStage   - 纯文本初筛（asyncio 并发，Semaphore 限流）
@@ -30,8 +30,8 @@ from .llm_gateway import call_llm
 from .vision_agent import call_vision_llm
 from .embed_cluster import cluster_related_posts, merge_similar_clusters
 from .analysis_graph import analyze_and_report
-from .llm.prompts import SCREENER_PROMPT
-from .analysis.topic_aggregator import TopicAggregator
+from .tools.screener_prompts import SCREENER_PROMPT
+from ..platform_service.analysis.topic_aggregator import TopicAggregator
 
 
 # ============================================================
@@ -407,7 +407,7 @@ class VisionStage:
 
     def _process_single(self, sp: ScreenedPost) -> ScreenedPost | None:
         """同步单帖子 Vision 处理逻辑（原 run() 的核心逻辑移至此）"""
-        from .llm.prompts import SCREENER_PROMPT
+        from .tools.screener_prompts import SCREENER_PROMPT
         from .schemas import ScreenerResult
 
         post = sp.post
@@ -502,7 +502,7 @@ class AnalysisSubGraph:
         }
 
         # ── 话题演化追踪（RAG 增强）──────────────────────
-        from .analysis.topic_tracker import (
+        from ..platform_service.analysis.topic_tracker import (
             generate_cluster_summary,
             retrieve_similar_topics,
             build_evolution_timeline,
@@ -580,7 +580,7 @@ def build_results(
     将 Cluster + AnalysisResult 展开为 List[PipelineResult]，
     每个 post 一条记录，与 save_ai_result() 格式完全兼容。
     """
-    from .analysis.topic_tracker import build_topic_id
+    from ..platform_service.analysis.topic_tracker import build_topic_id
 
     topic_id = build_topic_id(cluster.keyword, cluster.topic_name)
     ev = evolution_timeline or {}
@@ -779,7 +779,7 @@ class RadarPipeline:
     async def _background_index(self, topic_id: str, cluster, result, evolution_timeline):
         """后台话题索引任务（asyncio.Task）"""
         try:
-            from .analysis.topic_tracker import index_or_update_topic
+            from ..platform_service.analysis.topic_tracker import index_or_update_topic
             index_or_update_topic(
                 topic_id=topic_id,
                 keyword=cluster.keyword,
@@ -978,7 +978,7 @@ class RadarPipeline:
             elif _push_mode == "important" and result.get("risk_level", 0) < 4:
                 _is_alert = False
             if _is_alert:
-                from .notifier.models import AlertPayload
+                from ..platform_service.notifier.models import AlertPayload
                 urls = [p.get("url", "") for p in cluster.posts if p.get("url")]
                 rl = result["risk_level"]
                 risk_class_map = {1: "low", 2: "low", 3: "medium", 4: "high", 5: "critical"}
@@ -999,7 +999,7 @@ class RadarPipeline:
 
             # 后台索引任务
             if result["risk_level"] >= 3 and evolution_timeline:
-                from .analysis.topic_tracker import build_topic_id
+                from ..platform_service.analysis.topic_tracker import build_topic_id
                 topic_id = build_topic_id(cluster.keyword, cluster.topic_name)
                 task = asyncio.create_task(
                     self._background_index(topic_id, cluster, result, evolution_timeline)
@@ -1033,7 +1033,7 @@ class RadarPipeline:
             for a in alerts_to_send:
                 RADAR_ALERTS.labels(keyword=a.keyword, risk_level=str(a.risk_level)).inc()
             try:
-                from .notifier import send_batch_alert
+                from ..platform_service.notifier import send_batch_alert
                 keyword = self.config.keywords[0] if self.config.keywords else "监控关键词"
                 if not self.config.owner_id:
                     logger.warning("[Pipeline] 缺少 owner_id，跳过批量预警发送")

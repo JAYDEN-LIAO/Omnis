@@ -44,7 +44,7 @@ import backend.services.agent_service.agent_core  # noqa: F401
  
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-from backend.core.config import settings
+from backend.core.config import settings, parse_allowed_origins
 from backend.core.logger import get_logger
 from backend.core.rate_limiter import add_rate_limiting_middleware
 from backend.core.security_middleware import (
@@ -136,18 +136,23 @@ async def lifespan(app: FastAPI):
 
     # Fix 3.4: 关闭全局 HTTP 客户端，避免 TCP 连接泄漏
     try:
-        from services.platform_service.llm_gateway import global_http_client
+        from backend.services.agent_service.llm_gateway import global_http_client
         global_http_client.close()
         logger.info("[Gateway] 全局 HTTP 客户端已关闭")
     except Exception:
         pass
 
 
+_is_prod = settings.ENV == "prod"
 app = FastAPI(
     title="Omnis 统一接口网关",
     version="2.0",
     description="基于微服务架构的全局 API 网关",
     lifespan=lifespan,
+    # prod 关闭交互式文档与 OpenAPI schema，减少内部信息暴露（ref #3）
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
 
 # 8.1 trace_id 中间件：每个请求生成/沿用 trace_id，注入 ContextVar，回写响应头
@@ -177,10 +182,8 @@ async def trace_id_middleware(request: Request, call_next):
 #   dev  环境：allow_origins=["*"]，credentials=False（便于本地联调）
 #   prod 环境：allow_origins 来自 ALLOWED_ORIGINS，credentials=True（精确控制）
 if settings.ENV == "prod":
-    _origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
-    if not _origins:
-        logger.warning("[Gateway] ENV=prod 但 ALLOWED_ORIGINS 为空，将回退到 *（不安全）")
-        _origins = ["*"]
+    # 空值 / 非法源由 parse_allowed_origins 直接 raise，不再回退到 "*"（ref #3）
+    _origins = parse_allowed_origins(settings)
     _credentials = True
 else:
     _origins = ["*"]
@@ -219,8 +222,14 @@ app.include_router(admin_monitor_router, tags=["Admin Agent 监控"])
 
 
 @app.get("/metrics", tags=["可观测性"])
-async def metrics():
-    """Prometheus 指标暴露端点（7.2）"""
+async def metrics(request: Request):
+    """Prometheus 指标暴露端点（7.2）；prod 需 X-Metrics-Token（ref #3）。"""
+    if _is_prod:
+        import hmac
+        expected = settings.METRICS_TOKEN
+        provided = request.headers.get("X-Metrics-Token", "")
+        if not expected or not hmac.compare_digest(provided, expected):
+            return JSONResponse(status_code=403, content={"code": 403, "msg": "Forbidden"})
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -239,13 +248,11 @@ async def health_check():
       任一组件 unhealthy → 503
     """
     healthy = getattr(app.state, "scheduler_healthy", False)
-    msg = getattr(app.state, "scheduler_start_msg", "未启动")
 
+    # 只返回 ok / failed，不回显调度器消息、路径与异常内容（ref #3）
     checks = {
         "scheduler": "ok" if healthy else "failed",
     }
-    if not healthy:
-        checks["scheduler_msg"] = msg
 
     # DB 连通性检查
     try:
@@ -255,9 +262,8 @@ async def health_check():
         conn.execute("SELECT 1")
         conn.close()
         checks["database"] = "ok"
-    except Exception as e:
+    except Exception:
         checks["database"] = "failed"
-        checks["database_msg"] = str(e)[:200]
 
     # Qdrant 连通性检查
     try:
@@ -265,9 +271,8 @@ async def health_check():
         client = get_qdrant_client()
         client.get_collections()
         checks["qdrant"] = "ok"
-    except Exception as e:
+    except Exception:
         checks["qdrant"] = "failed"
-        checks["qdrant_msg"] = str(e)[:200]
 
     all_healthy = all(v == "ok" for v in checks.values() if isinstance(v, str))
     return JSONResponse(
@@ -275,18 +280,6 @@ async def health_check():
         content=checks,
     )
 if __name__ == "__main__":
-    # ── v2.2 安全检查 ─────────────────────────────────────
-    from core.config import settings
-    import sys as _sys_check
-    if not settings.JWT_SECRET or settings.JWT_SECRET in (
-        "dev-secret-change-me-in-prod-please-32bytes", "your-secret-key", "changeme", ""):
-        _sys_check.stderr.write(
-            "\n" + "="*60 + "\n"
-            "!!! 安全警告: JWT_SECRET 未设置或使用默认值 !!!\n"
-            "上线前必须设置环境变量 JWT_SECRET=<强随机密钥>\n"
-            "生成方式: python -c \"import secrets; print(secrets.token_hex(32))\"\n"
-            + "="*60 + "\n\n"
-        )
-    # ─────────────────────────────────────────────────────
-
+    # 安全校验已由 backend.core.config 在模块导入时统一执行（ref #3），
+    # 不再保留仅在 __main__ 分支打印 stderr 的软警告。
     uvicorn.run("gateway.main:app", host="0.0.0.0", port=8008, reload=True)

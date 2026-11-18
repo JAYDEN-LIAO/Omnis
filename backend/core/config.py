@@ -1,5 +1,6 @@
 # backend/core/config.py
 import os
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +30,21 @@ class Settings:
                   or os.getenv("LLM_MODEL", "")
                   or "deepseek-chat")
     DEFAULT_MODEL = _def_model
+
+    # ======== 配置2: 风险分析管线（回退: ANALYST/REVIEWER → DEFAULT）========
+    _analyst_api_key = os.getenv("ANALYST_API_KEY", "").strip() or _def_api_key
+    ANALYST_API_KEY = _analyst_api_key
+    _analyst_base_url = os.getenv("ANALYST_BASE_URL", "").strip() or _def_base_url
+    ANALYST_BASE_URL = _analyst_base_url
+    _analyst_model = os.getenv("ANALYST_MODEL", "").strip() or _def_model
+    ANALYST_MODEL = _analyst_model
+
+    _reviewer_api_key = os.getenv("REVIEWER_API_KEY", "").strip() or _def_api_key
+    REVIEWER_API_KEY = _reviewer_api_key
+    _reviewer_base_url = os.getenv("REVIEWER_BASE_URL", "").strip() or _def_base_url
+    REVIEWER_BASE_URL = _reviewer_base_url
+    _reviewer_model = os.getenv("REVIEWER_MODEL", "").strip() or _def_model
+    REVIEWER_MODEL = _reviewer_model
 
     # ======== AI 助手模型（回退: ASSISTANT → DEFAULT）========
     # 环境变量兼容 ASSISTANT_*（优先）和 AGENT_*（向后兼容）
@@ -92,6 +108,7 @@ class Settings:
     # ======== 环境标识（用于 CORS 等配置按环境区分）=======
     ENV = os.getenv("ENV", "dev").lower()  # dev | prod
     ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").strip()  # 逗号分隔
+    METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()  # prod 下 /metrics 的鉴权令牌
 
     # ======== API 认证配置 ========
     API_KEYS = os.getenv("API_KEYS", "")
@@ -131,42 +148,102 @@ class Settings:
 settings = Settings()
 
 
-# v2.2 P1#13：JWT_SECRET 启动校验
-def _validate_jwt_secret():
+# ── 生产启动强校验（ref #3）──
+# 校验在模块导入时执行，uvicorn 以「导入 app」方式启动同样会触发，
+# 不再依赖仅在 __main__ 分支打印的软警告。
+WEAK_JWT_SECRETS = frozenset({
+    "dev-secret-change-me-in-prod-please-32bytes", "your-secret-key",
+    "changeme", "secret", "jwt-secret", "test", "default", "123456",
+})
+ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
+
+def _validate_jwt_secret(s=settings) -> None:
+    """校验 JWT 密钥与算法；prod 一律 raise，dev 仅告警。"""
     import secrets
     import warnings
-    secret = settings.JWT_SECRET
-    env = settings.ENV
+
+    secret = s.JWT_SECRET
+    env = s.ENV
     if not secret:
         if env == "prod":
             raise RuntimeError(
                 "[CONFIG] JWT_SECRET 未配置或为空。生产环境必须设置 JWT_SECRET。"
                 "生成方式：python -c 'import secrets; print(secrets.token_urlsafe(48))'"
             )
-        else:
-            dev_secret = "dev-" + secrets.token_urlsafe(32)
-            settings.JWT_SECRET = dev_secret
-            warnings.warn(
-                f"[CONFIG] JWT_SECRET 未配置，自动生成临时 dev 密钥。"
-                f"多 worker 部署不互通，进程重启后所有 token 失效。",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return
-    if len(secret) < 16:
+        dev_secret = "dev-" + secrets.token_urlsafe(32)
+        s.JWT_SECRET = dev_secret
+        # 回写环境变量，使 reload 子进程与 crypto_utils 复用同一密钥
+        os.environ["JWT_SECRET"] = dev_secret
+        warnings.warn(
+            "[CONFIG] JWT_SECRET 未配置，自动生成临时 dev 密钥；进程重启后 token 失效。",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+
+    if secret.strip().lower() in WEAK_JWT_SECRETS:
         if env == "prod":
+            raise RuntimeError("[CONFIG] JWT_SECRET 为已知示例/弱值，生产环境禁止启动")
+        warnings.warn("[CONFIG] JWT_SECRET 为示例值，仅 dev 模式放行", RuntimeWarning, stacklevel=2)
+
+    min_len = 32 if env == "prod" else 16
+    if len(secret) < min_len:
+        if env == "prod":
+            raise RuntimeError(f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符 < {min_len}）")
+        warnings.warn(
+            f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符）。dev 模式放行。",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    if s.JWT_ALGORITHM not in ALLOWED_JWT_ALGORITHMS:
+        raise RuntimeError(
+            f"[CONFIG] 不支持的 JWT_ALGORITHM：{s.JWT_ALGORITHM}；"
+            f"允许 {sorted(ALLOWED_JWT_ALGORITHMS)}"
+        )
+
+
+def parse_allowed_origins(s=settings) -> list[str]:
+    """prod 下解析并强校验 CORS 源；缺失或非法一律 raise（fail-fast）。"""
+    raw = (s.ALLOWED_ORIGINS or "").strip()
+    if not raw:
+        if s.ENV == "prod":
+            raise RuntimeError("[CONFIG] ENV=prod 必须配置 ALLOWED_ORIGINS（逗号分隔的 https 源）")
+        return []
+    items = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    if s.ENV != "prod":
+        return items
+    for origin in items:
+        parts = urlsplit(origin)
+        if (
+            "*" in origin
+            or parts.scheme != "https"
+            or not parts.hostname
+            or parts.username or parts.password
+            or parts.path not in ("", "/")
+            or parts.query or parts.fragment
+        ):
             raise RuntimeError(
-                f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符 < 16）。"
+                "[CONFIG] ALLOWED_ORIGINS 只能是 https 源，且不得含通配、路径、查询或内嵌凭据"
             )
-        else:
-            warnings.warn(
-                f"[CONFIG] JWT_SECRET 太短（{len(secret)} 字符）。dev 模式放行。",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+    return items
+
+
+def validate_production_settings(s=settings) -> None:
+    """prod 启动前汇总校验；dev 直接放行。"""
+    if s.ENV != "prod":
+        return
+    _validate_jwt_secret(s)
+    parse_allowed_origins(s)
+    if not (os.getenv("DB_ENCRYPTION_KEY", "").strip() or s.JWT_SECRET):
+        raise RuntimeError("[CONFIG] ENV=prod 缺少可用的加密密钥（DB_ENCRYPTION_KEY / JWT_SECRET）")
+    if not s.METRICS_TOKEN:
+        raise RuntimeError("[CONFIG] ENV=prod 必须配置 METRICS_TOKEN，否则 /metrics 将无鉴权暴露")
 
 
 _validate_jwt_secret()
+validate_production_settings()
 
 
 # ── 多 Pipeline 模型解析 ──

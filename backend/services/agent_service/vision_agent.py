@@ -50,7 +50,7 @@ def call_vision_llm(image_url: str, post_text: str = "", platform: str = "wb", p
     Returns:
         视觉解析结果文本，失败时返回空字符串
     """
-    from .llm.prompts import VISION_PROMPT
+    from .tools.screener_prompts import VISION_PROMPT
 
     clean_image_url = image_url.strip('"\'')
     prompt = VISION_PROMPT.format(text_content=post_text if post_text else "无配文")

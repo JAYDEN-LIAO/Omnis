@@ -160,7 +160,13 @@ async def cancel_agent_stream(
     current_user: Dict = Depends(require_registered_user),
 ):
     """取消指定 session 当前正在执行的 Agent 流。"""
-    cancelled = cancel_registry.cancel(session_id)
+    owner_id = str(current_user["id"])
+    if not cancel_registry.owns(session_id, owner_id):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": 403, "msg": "无权取消该会话", "data": None},
+        )
+    cancelled = cancel_registry.cancel(session_id, owner_id)
     return {"code": 200, "data": {"cancelled": cancelled}}
 
 

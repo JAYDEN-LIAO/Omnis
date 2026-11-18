@@ -1,6 +1,7 @@
 # backend/services/platform_service/notifier/channel_wecom.py
 import requests
 from backend.core.logger import get_logger
+from backend.core.outbound_guard import OutboundPolicyError, validate_outbound_url
 from .base import NotifierBase
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 
@@ -15,6 +16,11 @@ class WeComNotifier(NotifierBase):
         url = cfg.get("webhook_url", "").strip()
         if not url:
             logger.warning("[WeCom] webhook_url 为空，跳过")
+            return False
+        try:
+            url = validate_outbound_url(url)
+        except OutboundPolicyError as e:
+            logger.warning(f"[WeCom] 出站目标被拒绝: {e}")
             return False
 
         try:
@@ -35,7 +41,7 @@ class WeComNotifier(NotifierBase):
 {urls_md}"""
 
             data = {"msgtype": "markdown", "markdown": {"content": content}}
-            resp = requests.post(url, json=data, timeout=10)
+            resp = requests.post(url, json=data, timeout=10, allow_redirects=False)
             result = resp.json()
 
             if result.get("errcode") == 0:
@@ -55,6 +61,11 @@ class WeComNotifier(NotifierBase):
         if not url:
             logger.warning("[WeCom] webhook_url 为空，跳过")
             return False
+        try:
+            url = validate_outbound_url(url)
+        except OutboundPolicyError as e:
+            logger.warning(f"[WeCom] 出站目标被拒绝: {e}")
+            return False
 
         try:
             lines = [f"### 【舆情预警】{batch.keyword} 监控报告（共{len(batch.alerts)}条风险舆情）\n"]
@@ -70,7 +81,7 @@ class WeComNotifier(NotifierBase):
 
             content = "\n".join(lines)
             data = {"msgtype": "markdown", "markdown": {"content": content}}
-            resp = requests.post(url, json=data, timeout=10)
+            resp = requests.post(url, json=data, timeout=10, allow_redirects=False)
             result = resp.json()
 
             if result.get("errcode") == 0:

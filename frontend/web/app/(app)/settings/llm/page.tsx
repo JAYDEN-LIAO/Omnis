@@ -26,10 +26,14 @@ const INPUT_CLASS =
   'w-full bg-white/70 border border-[color:var(--border-faint)] focus:border-[color:var(--primary-gold)] focus:ring-2 focus:ring-[oklch(0.78_0.16_85/0.15)] rounded-lg px-3 py-2 text-sm transition-all outline-none';
 
 export default function LLMSettingsPage() {
-  // 游客拦截
+  // 游客拦截放在无 Hooks 的包装组件里：内容组件不渲染，就不会触发任何数据请求
   if (isGuest()) {
     return <GuestBlock feature="模型配置" />;
   }
+  return <LLMSettingsContent />;
+}
+
+function LLMSettingsContent() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['llm-configs'], queryFn: () => llmApi.configs() });
   const [revealKey, setRevealKey] = useState<Record<string, boolean>>({});

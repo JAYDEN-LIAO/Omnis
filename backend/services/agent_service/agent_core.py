@@ -14,8 +14,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import Optional
 from openai import OpenAI, AsyncOpenAI
-from core.config import settings, get_agent_config
-from core.logger import get_logger
+from backend.core.config import settings, get_agent_config
+from backend.core.logger import get_logger
 from backend.core.metrics import (
     AGENT_TURNS,
     AGENT_TOOL_CALLS,
@@ -421,20 +421,38 @@ class CancelRegistry:
 
     def __init__(self):
         self._events: dict = {}
+        self._owners: dict[str, str] = {}
         self._lock = threading.Lock()
 
-    def register(self, session_id: str):
+    def register(self, session_id: str, owner_id: str = ""):
         event = asyncio.Event()
         with self._lock:
             self._events[session_id] = event
+            self._owners[session_id] = owner_id
 
     def unregister(self, session_id: str):
         with self._lock:
             self._events.pop(session_id, None)
+            self._owners.pop(session_id, None)
 
-    def cancel(self, session_id: str) -> bool:
-        """触发取消事件。返回 True 表示有效取消。"""
+    def owns(self, session_id: str, owner_id: str) -> bool:
+        """校验活跃 session 归属，owner 为空或不匹配都拒绝。"""
         with self._lock:
+            return (
+                session_id in self._events
+                and bool(owner_id)
+                and self._owners.get(session_id) == owner_id
+            )
+
+    def cancel(self, session_id: str, owner_id: str | None = None) -> bool:
+        """触发取消事件；传入 owner_id 时必须通过归属校验。"""
+        with self._lock:
+            if owner_id is not None and (
+                session_id not in self._events
+                or not owner_id
+                or self._owners.get(session_id) != owner_id
+            ):
+                return False
             event = self._events.get(session_id)
             if event:
                 event.set()
@@ -498,7 +516,7 @@ async def chat_with_agent_stream(
     # 先返回 session_id（前端必须知道这个才能保持同一会话）
     yield emit_session(ctx.session_id)
 
-    cancel_registry.register(ctx.session_id)
+    cancel_registry.register(ctx.session_id, ctx.owner_id)
 
     # ── Demo Mode: 预设问答拦截 ──
     try:

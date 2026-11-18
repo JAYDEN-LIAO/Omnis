@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from core.config import settings, get_agent_config
+from backend.core.config import settings, get_agent_config
 from openai import OpenAI
 
 from backend.core.logger import get_logger

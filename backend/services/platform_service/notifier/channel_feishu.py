@@ -1,6 +1,7 @@
 # backend/services/platform_service/notifier/channel_feishu.py
 import requests
 from backend.core.logger import get_logger
+from backend.core.outbound_guard import OutboundPolicyError, validate_outbound_url
 from .base import NotifierBase
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 
@@ -15,6 +16,11 @@ class FeishuNotifier(NotifierBase):
         url = cfg.get("webhook_url", "").strip()
         if not url:
             logger.warning("[Feishu] webhook_url 为空，跳过")
+            return False
+        try:
+            url = validate_outbound_url(url)
+        except OutboundPolicyError as e:
+            logger.warning(f"[Feishu] 出站目标被拒绝: {e}")
             return False
 
         try:
@@ -77,7 +83,7 @@ class FeishuNotifier(NotifierBase):
                 }
             }
 
-            resp = requests.post(url, json=data, timeout=10)
+            resp = requests.post(url, json=data, timeout=10, allow_redirects=False)
             result = resp.json()
 
             if result.get("code") == 0 or result.get("status") == 0:
@@ -96,6 +102,11 @@ class FeishuNotifier(NotifierBase):
         url = cfg.get("webhook_url", "").strip()
         if not url:
             logger.warning("[Feishu] webhook_url 为空，跳过")
+            return False
+        try:
+            url = validate_outbound_url(url)
+        except OutboundPolicyError as e:
+            logger.warning(f"[Feishu] 出站目标被拒绝: {e}")
             return False
 
         try:
@@ -142,7 +153,7 @@ class FeishuNotifier(NotifierBase):
                 }
             }
 
-            resp = requests.post(url, json=data, timeout=10)
+            resp = requests.post(url, json=data, timeout=10, allow_redirects=False)
             result = resp.json()
 
             if result.get("code") == 0 or result.get("status") == 0:
