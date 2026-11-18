@@ -51,6 +51,8 @@
 
 ### 0.4 需要人工确认的外部动作
 
+**2026-11-18 负责人决策（结案）**：爬虫依赖本地登录态维持会话，因此保留 `browser_data/` 与 `logs/` 的本地文件，治理方式固定为「`.gitignore` 忽略 + 已从索引移出」（即 #1a）。凭据轮换、远端历史重写、临时 profile 改造（#1b）**不再排期**。远端历史中曾出现的登录态仍按「已泄露」看待，属已知残余风险并由负责人知悉；后续更换爬虫登录态时不得再次入库。
+
 以下动作**不在本文件内自动执行**，需项目负责人明确确认后单独处理：
 
 - `git rm -r --cached`（修改索引）、`git filter-repo` 等历史重写操作属于破坏性操作。
@@ -64,10 +66,10 @@
 
 | # | 批次 | 改造点 | 等级 | 状态 |
 |---|------|--------|------|------|
-| 1 | P0 | 清理已入库的登录态与运行日志 | 严重 | 进行中 |
+| 1 | P0 | 清理已入库的登录态与运行日志 | 严重 | 已完成 |
 | 2 | P0 | 封堵 SSRF 与系统 Key 外泄 | 严重 | 未开始 |
 | 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 未开始 |
-| 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 未开始 |
+| 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 进行中 |
 | 5 | P1 | 修复 22 处失效导入与 `ANALYST_*` 缺失 | 高 | 进行中 |
 | 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 进行中 |
 | 7 | P1 | 统一前端鉴权链路 | 高 | 未开始 |
@@ -108,12 +110,11 @@
 
 - [x] #1a：`git rm -r --cached backend/services/crawler_service/browser_data/` 与 `git rm -r --cached logs/`（已确认后执行，本地文件保留）
 - [x] #1a：`.gitignore` 改为整目录 `logs/`、补 `*.log.*`；`browser_data/` 规则保留
-- [ ] #1b：爬虫 profile 改为运行时临时目录，启动脚本不再复用已提交目录（暂缓，避免影响现有登录态）
-- [ ] #1b：按 0.4 轮换全部相关凭据；远端历史重写单独评估（暂缓，风险仍存在）
+- [x] #1b 结案（2026-11-18 负责人确认）：不再改造 profile 路径、不再轮换凭据、不再重写历史；治理方式固定为 #1a 的 `.gitignore` 方案
 
-**#1a 验收**：`git ls-files | grep -c browser_data/` 与 `git ls-files logs | wc -l` 均为 0；`.gitignore` 覆盖 `*.log.*`；本地 `browser_data/` 与 `logs/` 文件仍保留，爬虫现有路径不变。
+**#1a 验收**：`git ls-files | grep -c browser_data/` 与 `git ls-files logs | wc -l` 均为 0；`.gitignore` 覆盖 `*.log.*`；本地 `browser_data/` 与 `logs/` 文件仍保留，爬虫现有路径不变。2026-11-18 复核：两项计数均为 0，`.gitignore` 含 `logs/`、`*.log.*`、`backend/services/crawler_service/browser_data/`。
 
-**#1 完成验收**：在 #1a 基础上，爬虫仍能以临时 profile 启动，且相关凭据已轮换；#1b 未完成前本项保持「进行中」。
+**#1 完成验收（2026-11-18 修订口径）**：登录态与运行日志不再受版本控制、本地爬虫仍可读取原有 profile、`.gitignore` 覆盖全部相关路径即视为完成。远端历史中的旧凭据视为已泄露的残余风险单独知悉，不再作为本项阻塞条件。
 
 ---
 
@@ -165,9 +166,27 @@
 
 ### #4 修复授权链失效
 
+**2026-11-12 执行记录（业务层）**
+
+- 已移除公开预设邀请码与启动时自动提权逻辑；新增 `create_invite_code()` 用于部署/管理流程显式生成有限次邀请码；历史 `max_uses<=0` 的激活码会在初始化时停用。
+- 邀请码兑换改为条件 UPDATE 原子扣减，并为 `(user_id, code)` 增加唯一索引；一次性历史提权迁移有 `auth_schema_migrations` 标记且不再挂在应用启动流程。
+- 三个 JWT 依赖入口均强制 `expected_type="access"`，refresh token 不能再调用受保护业务 API。
+- RSS token 改由服务端生成，长度至少 32，数据库增加唯一索引；owner 查找改为 `json_extract` 精确匹配，客户端传入 token 不生效。
+- 全局调度器启停改为 `require_admin`；Agent stream 取消增加 `(owner_id, session_id)` 归属校验。
+- 已同步 `docs/API_CONTRACT.md`，并移除 README / CLAUDE / 功能清单中的公开固定邀请码。
+- 实测：`python -m compileall -q backend tests` 通过；新增授权业务回归 7 项通过；全仓 pytest **12 passed, 2 warnings**。
+- **边界说明**：按负责人要求未修改部署脚本 / CI；邀请码生成函数已提供，但部署期自动执行入口后续由部署负责人接入，因此 #4 暂不标记完成。
+
+**2026-11-18 落地记录**
+
+- 上述业务层修复与 7 个授权回归用例此前长期停留在工作区未提交状态，本轮已逐份审查后提交（ref #4）。审查确认：`owner_id` 在注册与取消两端均为字符串、`require_admin` 已导入、`invite_redemptions.id` 存在且与唯一索引匹配。
+- 补日志脱敏：邀请码兑换成功日志不再打印完整邀请码，仅保留前 4 位与 `***`（`AGENTS.md` 安全红线）。
+- `docs/API_CONTRACT.md`、README / CLAUDE / 功能清单中公开的固定邀请码说明已同步移除。
+- **仍未完成**：部署期自动生成邀请码的入口未接入（需部署负责人操作），#4 保持「进行中」。
+
 **现状证据**
 
-- `auth_service/db/__init__.py:458` `INVITE_CODE_PRESET = "KSKBL1027"`，`:467-469` 插入时 `max_uses=0`（`:517` 判定为不限次），`:546` 兑换后 `UPDATE users SET has_system_access = 1`。该码在 README、CLAUDE.md、功能清单中公开。
+- `auth_service/db/__init__.py` 曾内置公开固定邀请码，并在初始化时插入 `max_uses=0` 的不限次记录；README、CLAUDE.md、功能清单也公开了该码。
 - `auth_service/db/__init__.py:57-65` `_migrate_existing_users_access()` 每次执行 `UPDATE users SET has_system_access = 1 WHERE ... = 0`，`:145` 由 `init_auth_tables()` 调用，后者在 `auth_service/api.py:37` 模块导入时执行 → **每次启动给全体用户提权**。
 - `auth_service/deps.py:40,81,120` `decode_token(token)` 未传 `expected_type`；`jwt.py:107-117` 仅在显式传入时才拒绝 `type="refresh"` → 7 天有效的 refresh token 可当 access 用于所有接口。
 - `platform_service/db/db_push.py:116-131` 用 `config_json LIKE '%token%' ESCAPE '\'` 子串匹配定位 owner；`api.py:660` 的 rss token 由用户任意指定；`api.py:832-848` `/rss/{token}.xml` 无 JWT 依赖。
@@ -177,11 +196,11 @@
 
 **改造动作**
 
-- [ ] 移除预设邀请码，改为部署时生成入库；`max_uses` 有限值 + 原子条件 UPDATE 扣减
-- [ ] 全量提权迁移改为带 schema version 的一次性迁移，从 `init_auth_tables()` 移除
-- [ ] `deps.py` 三个入口统一 `decode_token(token, expected_type="access")`；`revoke_token` 同步
-- [ ] RSS 改为 `json_extract(config_json,'$.access_token') = ?` 精确匹配；token 由 `secrets.token_urlsafe(32)` 服务端生成，加唯一索引
-- [ ] 调度器启停改为 `Depends(require_admin)`；顺带修 `agent_service/api.py:157-164` 的 cancel 越权（按 `(owner_id, session_id)` 校验）
+- [x] 移除预设邀请码，改为部署时生成入库；`max_uses` 有限值 + 原子条件 UPDATE 扣减（业务函数已完成；部署脚本接入按本轮边界暂缓）
+- [x] 全量提权迁移改为带 schema version 的一次性迁移，从 `init_auth_tables()` 移除
+- [x] `deps.py` 三个入口统一 `decode_token(token, expected_type="access")`；logout 前置 access 依赖，同步拒绝 refresh
+- [x] RSS 改为 `json_extract(config_json,'$.access_token') = ?` 精确匹配；token 由 `secrets.token_urlsafe(32)` 服务端生成，加唯一索引
+- [x] 调度器启停改为 `Depends(require_admin)`；顺带修 `agent_service/api.py:157-164` 的 cancel 越权（按 `(owner_id, session_id)` 校验）
 
 **验收**：兑换第二次邀请码失败；重启后新用户仍无系统权限；refresh token 调受保护接口返回 401；`/rss/a.xml` 无法命中任何用户；普通用户调 scheduler 返回 403。
 
@@ -232,6 +251,14 @@
 - 已删除 `next.config.ts` 的 `typescript.ignoreBuildErrors`；实测 `tsc --noEmit` 与 CI 同款静态导出构建均通过并产出 `out/`。
 - **未完成**：`npm run lint` 仍失败，存量 5 个 Hooks 条件调用错误（settings/llm 3 个、settings/push 2 个）与 23 个警告；这些属于 #9 恢复规则后的必修项。静态导出警告仍显示 middleware 在导出运行时被禁用；生产边缘鉴权与部署路径归 #7/#8 统一处理，本项不擅自改部署。
 
+**2026-11-18 补充（评审遗留修复）**
+
+- 修复删除 `next/font/google` 后的衬线字体回归：`globals.css` 的 `@theme inline` 补 `--font-serif` 定义，Playfair Display 与 Material Symbols 合并为一个运行时 `<link>` 加载，构建期仍不访问 Google Fonts。
+- 删除 `next.config.ts` 的 `eslint.ignoreDuringBuilds`；实测 `STATIC_EXPORT=true npm run build` 仍通过，且构建日志现在会真正执行 lint（0 error / 25 warning）。
+- 移除 `next.config.ts` 里 `|| 'http://localhost:8008'` 硬编码回退（`AGENTS.md` 5.2）：非静态模式必须显式配置 `NEXT_PUBLIC_API_BASE`，示例值已在 `frontend/web/.env.example`。
+- 收尾 #9 的 Hooks 修复副作用：把游客拦截移到无 Hooks 的包装组件，游客访问设置页时内容组件不渲染，不再触发配置查询请求。
+- **仍未完成**：静态导出禁用 middleware（本轮构建实测仍告警，`out/admin/*.html`、`out/settings/*.html` 直接产出），生产路由鉴权未闭环，归 #7/#8。
+
 **现状证据（构建失败为静态推断，需实跑确认）**
 
 - `.github/workflows/deploy.yml:28` `STATIC_EXPORT=true npm run build`；`frontend/web/next.config.ts:5-16` 因此走 `output: "export"`，`rewrites` 只在 else 分支生成。Next.js 静态导出不支持 Middleware / rewrites。
@@ -245,7 +272,7 @@
 - [ ] 二选一：改回 `next start`（SSR）部署并保留 middleware；或静态站由 nginx 在边缘做鉴权。不要把 middleware 与 `output: export` 混用（当前仍沿用 CI 静态导出，middleware 仅非静态模式有效；生产鉴权未闭环）
 - [x] 用 `<Suspense>` 包裹 `AgentPage`；修正 middleware 的保护路径清单
 - [x] 关闭 `ignoreBuildErrors`，逐个修掉类型错误（当前 `tsc --noEmit` 已通过；lint 的 5 个既有 Hooks 错误留待 #9/#14，不在本项顺手改）
-- [ ] CI 增加 `npm run lint && npm run type-check`（见 #9）
+- [x] CI 增加 `npm run lint && npm run type-check`（见 #9；2026-11-18 已随质量门禁落地，并追加 `python -m pytest -q`）
 
 **验收**：`STATIC_EXPORT=true npm run build` 成功产出 `out/`；`/admin` 未授权访问在所选方案下确实被拦截。
 
@@ -306,6 +333,15 @@
 - 实测：`python -m compileall -q backend tests` 通过；`python -m pytest -q` 为 **5 passed, 3 warnings**；`npm run type-check` 通过；`npm run lint` 通过（0 error / 25 warning）；`STATIC_EXPORT=true npm run build` 通过。
 - **未做**：按负责人确认的边界，未修改 `.github/workflows/deploy.yml`、CI、Nginx、Docker 或部署脚本；#9 不能标记完成。
 
+**2026-11-18 执行记录（CI 质量门禁落地）**
+
+- `.github/workflows/deploy.yml` 在「上传 / 重启」等部署步骤之前新增：Setup Python 3.11、`pip install -r requirements.txt -r requirements-dev.txt`、`python -m pytest -q`、`npm run lint`、`npm run type-check`。任一步失败即终止 job，不会执行后续 `rm -rf` 与上传；**未改动任何部署步骤本身**。
+- 补齐 `requirements.txt` 的 `croniter`：静态递归分析 gateway 导入链（76 个文件、15 个第三方模块）后确认它是唯一缺失包；#10 其余依赖与导入风格治理仍独立排期。
+- 删除 `eslint.ignoreDuringBuilds` 后，静态导出构建自身也会执行 lint。
+- 实测：`npm run type-check` 退出 0；`npm run lint` 0 error / 25 warning；`STATIC_EXPORT=true npm run build` 退出 0；`python -m compileall -q backend tests` 退出 0；`git diff --check` 无空白错误。
+- **未验证**：本机未能完成干净环境的 `python -m pytest -q`（PyPI 拉取缓慢、依赖未装齐），门禁在 GitHub Actions 的首次运行结果需在首次 `main` 合并时观察。
+- **仍未完成**：`react-hooks/*` 仍有 2 个存量例外、25 个 warning；`功能清单与验证.md` 的关键路径尚未固化为自动化用例；#9 保持「进行中」。
+
 **现状证据**
 
 - 全仓 **0 个测试文件**：无 `tests/`、`test_*.py`、`conftest.py`、`pytest.ini`、`pyproject.toml`、`smoke_test.py`；`requirements-dev.txt` 声明了 pytest 系列却无用例。
@@ -327,7 +363,7 @@
 
 - [x] 建 `tests/` 与 pytest 配置，先写「导入链 + 关键端点」最小 smoke test（已覆盖 #5 断链与 gateway 核心路由；#3 启动校验仍待补）
 - [ ] 前端补 `npm run lint` / `type-check` 脚本并恢复 react-hooks 规则（脚本已有；5 个 Hooks error 已清零，大部分规则已恢复，仍有 2 个存量例外与 25 个 warning）
-- [ ] CI 增加门禁：`pytest` + `npm run lint` + `npm run type-check`，失败即阻止部署
+- [x] CI 增加门禁：`pytest` + `npm run lint` + `npm run type-check`，失败即阻止部署（2026-11-18 已加，首次实跑待 `main` 合并时观察）
 - [ ] 把 `功能清单与验证.md` 里的关键路径逐步固化为自动化用例
 
 **验收**：CI 在故意引入一个错误 import 时变红；正常提交变绿。
