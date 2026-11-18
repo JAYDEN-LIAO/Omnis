@@ -266,6 +266,13 @@ GET  /rss/{access_token}.xml
 - token 至少 32 个随机字符，并在数据库层保证唯一
 - RSS owner 查找使用 `json_extract(config_json, '$.access_token') = ?` 精确匹配
 
+**2026-11-18 出站安全约束（ref #2）**
+
+- `webhook_url` 与 `smtp_host` 在**保存、测试、实际发送**三个环节都经过统一出站校验：仅 https（SMTP 为公网域名）、拒绝 IP 字面量与私网/环回/链路本地/云元数据解析结果、禁止跟随重定向、可选 `OUTBOUND_HOST_ALLOWLIST` 域名白名单。
+- 非法目标在保存/测试时返回 `400`；存量恶意配置在发送阶段被跳过，不再发起连接。
+- `smtp_password` 以 Fernet 密文落库、读取时解密，API 响应始终不含该字段（字段移除行为不变）。
+- 出站请求的错误响应不回显上游响应体或异常内容。
+
 ---
 
 ## 7. LLM 配置（v1 → v2 改造）
@@ -276,6 +283,14 @@ GET  /api/llm/configs
 POST /api/llm/config/{agent}        # 改为 admin only
 POST /api/llm/test/{agent}
 ```
+
+**2026-11-18 安全约束（ref #2）**
+
+- `POST /api/llm/test/{agent}` 必须提供调用方**自有** `api_key`（请求体显式传入，或用户已保存的自有 Key）。系统默认 Key 一律不参与该请求，缺失时返回 `400`。
+- `base_url` 仅接受 https 且 DNS 解析为公网地址的目标；IP 字面量、私网/环回/链路本地/云元数据、URL 内嵌凭据、重定向均被拒绝，非法返回 `400`。
+- 测试失败统一返回 `502` 与固定文案；响应不含上游响应体、异常内容或内部路径。
+- `GET /api/llm/configs` 的 `api_key_masked` 只反映用户自有 Key；使用系统默认 Key 时返回空字符串（字段保留，前端无需改动）。
+- 使用系统默认 Key 时，生效配置强制搭配系统默认 `base_url`，用户自定义 `base_url` 不生效。
 
 ### 7.2 用户级覆盖（v2 新增）
 普通用户可以在前端"模型设置"页覆盖自己 session 的模型，无需 admin 权限。
@@ -317,11 +332,19 @@ Authorization: Bearer <admin-token>
 
 ---
 
-## 11. 指标暴露（不变）
+## 11. 指标暴露与生产启动约束
 
 ```
 GET /metrics    # Prometheus 文本格式
+X-Metrics-Token: <METRICS_TOKEN>   # ENV=prod 必填，缺失或不匹配返回 403
 ```
+
+**2026-11-18（ref #3）**
+
+- `ENV=prod` 时 `docs` / `redoc` / `openapi.json` 全部关闭。
+- `GET /health` 只返回 `scheduler` / `database` / `qdrant` 的 `ok` 或 `failed`，不再回显异常内容、路径或调度器消息。
+- `ENV=prod` 启动必填：`JWT_SECRET`（≥32 字符、非弱值）、`ALLOWED_ORIGINS`（逗号分隔的 https 源）、`METRICS_TOKEN`；`JWT_ALGORITHM` 仅允许 HS256/HS384/HS512。任一缺失或非法，进程在导入配置阶段即拒绝启动（fail-fast），不再静默回退。
+- CORS 在 prod 下不再回退 `allow_origins=["*"]`。
 
 ---
 

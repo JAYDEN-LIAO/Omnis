@@ -8,10 +8,26 @@ from typing import Optional
 
 from backend.core.database import get_db_connection
 from backend.core.logger import get_logger
+from backend.core.crypto_utils import encrypt_api_key, decrypt_api_key
 
 logger = get_logger("radar.db")
 
 from .db_audit import insert_audit_log
+
+
+def _encrypt_push_secrets(config: dict) -> dict:
+    """写入前加密 SMTP 密码，兼容存量明文；已是 Fernet 密文则不重复加密（ref #2）。"""
+    value = config.get("smtp_password")
+    if isinstance(value, str) and value and not value.startswith("gAAAAA"):
+        config["smtp_password"] = encrypt_api_key(value)
+    return config
+
+
+def _decrypt_push_secrets(config: dict) -> dict:
+    """读出后解密 SMTP 密码，供 notifier 内部使用；API 层仍会将其从响应中移除。"""
+    if config.get("smtp_password"):
+        config["smtp_password"] = decrypt_api_key(config["smtp_password"])
+    return config
 
 
 def _ensure_push_settings_table():
@@ -81,7 +97,7 @@ def get_push_config(owner_id: str, channel: str) -> dict:
         )
         row = cursor.fetchone()
     if row:
-        return json.loads(row[0])
+        return _decrypt_push_secrets(json.loads(row[0]))
     # 返回默认空配置
     defaults = {
         "email": {"enabled": False, "risk_min_level": 3},
@@ -93,8 +109,9 @@ def get_push_config(owner_id: str, channel: str) -> dict:
 
 
 def save_push_config(owner_id: str, channel: str, config: dict) -> None:
-    """保存指定用户指定通道的配置（v2.2：per-owner）"""
+    """保存指定用户指定通道的配置（v2.2：per-owner；敏感字段加密落库）"""
     _ensure_push_settings_table()
+    payload = _encrypt_push_secrets(dict(config))
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -103,7 +120,7 @@ def save_push_config(owner_id: str, channel: str, config: dict) -> None:
             ON CONFLICT(owner_id, channel) DO UPDATE SET
                 config_json = excluded.config_json,
                 updated_at = CURRENT_TIMESTAMP
-        ''', (owner_id, channel, json.dumps(config)))
+        ''', (owner_id, channel, json.dumps(payload)))
         conn.commit()
 
 
@@ -149,9 +166,9 @@ def get_all_push_configs(owner_id: Optional[str] = None) -> dict[str, dict]:
     for row in rows:
         if owner_id is None and len(row) == 3:
             # 全部模式：{(owner_id, channel): config}
-            result[f"{row[0]}:{row[1]}"] = json.loads(row[2])
+            result[f"{row[0]}:{row[1]}"] = _decrypt_push_secrets(json.loads(row[2]))
         else:
-            result[row[0]] = json.loads(row[1])
+            result[row[0]] = _decrypt_push_secrets(json.loads(row[1]))
     # 补全未配置的通道默认值
     default_channels = ("email", "wecom", "feishu", "rss")
     if owner_id is not None:

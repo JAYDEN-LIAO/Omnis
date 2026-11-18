@@ -3,6 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from backend.core.logger import get_logger
+from backend.core.outbound_guard import OutboundPolicyError, validate_outbound_host, validate_outbound_url
 from backend.services.auth_service.deps import get_current_user, get_current_user_or_api_key, get_optional_user, require_admin, require_registered_user, can_view_all_data
 
 logger = get_logger("radar.api")
@@ -646,6 +647,14 @@ def save_push_config(channel: str, req: PushConfigUpdateRequest, current_user: d
         "enabled": req.enabled,
         "risk_min_level": req.risk_min_level,
     }
+    # 出站目标在保存时即拒绝，避免恶意配置只在发送阶段才被拦截（ref #2）
+    try:
+        if channel == "email" and req.smtp_host:
+            validate_outbound_host(req.smtp_host, req.smtp_port)
+        elif channel in ("wecom", "feishu") and req.webhook_url:
+            validate_outbound_url(req.webhook_url)
+    except OutboundPolicyError as e:
+        return {"code": 400, "msg": f"配置未保存：{e}"}
     if channel == "email":
         cfg.update({
             "smtp_host": req.smtp_host,
@@ -685,6 +694,14 @@ def test_push_channel(req: PushTestRequest, current_user: dict = Depends(require
     cfg = _db_get(current_user["id"], req.channel)
     if not cfg.get("enabled"):
         return {"code": 400, "msg": "请先启用该通道再测试"}
+    # 存量配置同样要过出站校验，防止历史恶意值绕过保存期检查（ref #2）
+    try:
+        if ch == PushChannel.EMAIL and cfg.get("smtp_host"):
+            validate_outbound_host(cfg["smtp_host"], int(cfg.get("smtp_port") or 587))
+        elif ch in (PushChannel.WECOM, PushChannel.FEISHU) and cfg.get("webhook_url"):
+            validate_outbound_url(cfg["webhook_url"])
+    except (OutboundPolicyError, ValueError, TypeError):
+        return {"code": 400, "msg": "通道配置不符合出站安全策略，请重新保存配置"}
 
     ok = test_channel(ch, cfg)
     if ok:
@@ -727,12 +744,13 @@ def get_llm_configs(current_user: dict = Depends(require_registered_user)):
         user_cfg = get_model_config(owner_id, role_upper) or {}
         eff = get_effective_config(owner_id, role_upper)
 
-        # 脱敏显示实际生效的 API 密钥（系统默认或用户自定义）
-        effective_api_key = eff.get("api_key", "") or ""
+        # 只脱敏回显用户自有 Key；系统默认 Key 的任何片段都不下发给浏览器（ref #2）
+        own_api_key = user_cfg.get("api_key", "") or ""
         api_key_masked = (
-            "****" + effective_api_key[-4:] if effective_api_key and len(effective_api_key) >= 4
-            else ("***" if effective_api_key else "")
+            "****" + own_api_key[-4:] if len(own_api_key) >= 4
+            else ("***" if own_api_key else "")
         )
+        effective_api_key = eff.get("api_key", "") or ""
 
         result[agent] = {
             "label": info["label"],
@@ -761,6 +779,11 @@ def update_llm_config(agent: str, req: LLMConfigUpdateRequest, current_user: dic
     # 仅传入非空字段；api_key=None 让 upsert 保留旧值
     kwargs = {}
     if req.base_url:
+        # 保存期即校验，避免存量恶意 base_url 在后续实际 LLM 调用时触发 SSRF（ref #2）
+        try:
+            validate_outbound_url(req.base_url)
+        except OutboundPolicyError as e:
+            return {"code": 400, "msg": f"Base URL 不符合出站安全策略：{e}"}
         kwargs["base_url"] = req.base_url
     if req.model:
         kwargs["model"] = req.model
@@ -794,21 +817,32 @@ def test_llm_config(
 ):
     """测试当前用户指定 Agent 的 API 连通性。
     可选传入 api_key/base_url/model 覆盖当前配置测试。"""
-    from backend.shared.db.model_config_db import get_effective_config
+    from backend.shared.db.model_config_db import get_effective_config, get_model_config
 
     if agent not in LLM_AGENTS:
         return {"code": 400, "msg": f"无效 Agent：{agent}"}
 
-    # 优先用请求中传入的新值测试，未传则从生效配置读取
-    eff = get_effective_config(current_user["id"], agent.upper())
-    api_key = (req.api_key.strip() if req and req.api_key else "") or eff.get("api_key") or ""
+    role_upper = agent.upper()
+    # 连通性测试只接受调用方显式提供或用户自有的 Key。
+    # 系统默认 Key 绝不参与对外测试请求，避免被用户可控 base_url 外带（ref #2）。
+    provided_key = (req.api_key.strip() if req and req.api_key else "")
+    user_cfg = get_model_config(current_user["id"], role_upper) or {}
+    own_key = (user_cfg.get("api_key", "") or "").strip()
+    api_key = provided_key or own_key
+    if not api_key:
+        return {"code": 400, "msg": "连通性测试需显式提供自有 API Key；系统默认 Key 不可用于此测试"}
+
+    eff = get_effective_config(current_user["id"], role_upper)
     base_url = (req.base_url.strip() if req and req.base_url else "") or eff.get("base_url") or ""
     model = (req.model.strip() if req and req.model else "") or eff.get("model") or ""
+    if not base_url:
+        return {"code": 400, "msg": "Base URL 未配置"}
 
-    if not api_key or not base_url:
-        return {"code": 400, "msg": "API Key 或 Base URL 未配置"}
+    try:
+        base_url = validate_outbound_url(base_url).rstrip("/")
+    except OutboundPolicyError as e:
+        return {"code": 400, "msg": f"Base URL 不符合出站安全策略：{e}"}
 
-    base_url = base_url.rstrip("/")
     try:
         import requests
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -816,18 +850,21 @@ def test_llm_config(
         if agent == "embedding":
             # 向量引擎走 /embeddings 接口
             payload = {"model": model, "input": "test"}
-            resp = requests.post(f"{base_url}/embeddings", headers=headers, json=payload, timeout=15)
+            endpoint = f"{base_url}/embeddings"
         else:
             # 其他 Agent 走 /chat/completions
             payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
-            resp = requests.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=15)
+            endpoint = f"{base_url}/chat/completions"
+        # 禁止重定向：否则 302 会把带 Key 的请求带去未校验的目标
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=15, allow_redirects=False)
 
         if resp.status_code == 200:
             return {"code": 200, "msg": "连接成功"}
-        else:
-            return {"code": 500, "msg": f"接口返回错误: {resp.status_code} - {resp.text[:100]}"}
+        return {"code": 502, "msg": f"上游接口返回 HTTP {resp.status_code}"}
     except Exception as e:
-        return {"code": 500, "msg": f"连接失败: {str(e)}"}
+        # 不回显上游响应体与异常内容，避免泄漏内部地址与凭据
+        logger.warning(f"[LLMConfig] 连通性测试请求失败: {type(e).__name__}")
+        return {"code": 502, "msg": "连接失败，请检查 Base URL 与网络配置"}
 
 
 # ============================================================

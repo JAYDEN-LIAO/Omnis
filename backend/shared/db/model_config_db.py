@@ -170,12 +170,19 @@ def get_effective_config(owner_id: str, agent_role: str) -> dict:
     # 系统默认从 settings 读（沿用现有 config.py 的 DEFAULT_* 字段）
     from backend.core.config import settings
 
+    user_has_own_key = bool((user_cfg or {}).get("api_key"))
+    system_access = _check_user_system_access(owner_id)
+    # 使用系统 Key 时强制搭配系统 base_url，防止系统 Key 被发到用户可控主机（ref #2）
+    system_key_in_use = (not user_has_own_key) and system_access
+
     def _field(name: str) -> str:
-        # 优先 user 配置
         if user_cfg and user_cfg.get(name):
-            return user_cfg[name]
+            if name == "base_url" and system_key_in_use:
+                pass  # 忽略用户自定义 base_url，回落到系统默认
+            else:
+                return user_cfg[name]
         # 用户无系统权限 → 不返回系统默认 Key
-        if name == "api_key" and not _check_user_system_access(owner_id):
+        if name == "api_key" and not system_access:
             return ""
         # 回退到角色专属系统配置（如 ASSISTANT_MODEL / EMBEDDING_MODEL）
         role_config = getattr(settings, f"{agent_role}_{name.upper()}", "") or ""
@@ -199,5 +206,5 @@ def _check_user_system_access(owner_id: str) -> bool:
         from backend.services.auth_service.db import get_user_system_access
         return get_user_system_access(owner_id)
     except Exception:
-        # 降级：数据库不可读时允许访问（不误伤）
-        return True
+        # fail-closed：权限库不可读时不得默认获得系统 Key（ref #3）
+        return False

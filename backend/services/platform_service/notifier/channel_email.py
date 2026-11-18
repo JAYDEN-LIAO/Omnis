@@ -5,6 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.header import Header
 from backend.core.logger import get_logger
+from backend.core.outbound_guard import validate_outbound_host
 from .base import NotifierBase
 from .models import AlertPayload, BatchAlertPayload, PushChannel
 
@@ -34,12 +35,14 @@ class EmailNotifier(NotifierBase):
             # 连接 SMTP 并发送
             if cfg.get("smtp_use_tls", True):
                 context = ssl.create_default_context()
+                validate_outbound_host(cfg["smtp_host"], int(cfg.get("smtp_port") or 587))
                 with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
                     server.starttls(context=context)
                     if cfg.get("smtp_user") and cfg.get("smtp_password"):
                         server.login(cfg["smtp_user"], cfg["smtp_password"])
                     server.sendmail(cfg["from_addr"], cfg["to_addrs"], msg.as_string())
             else:
+                validate_outbound_host(cfg["smtp_host"], int(cfg.get("smtp_port") or 587))
                 with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
                     if cfg.get("smtp_user") and cfg.get("smtp_password"):
                         server.login(cfg["smtp_user"], cfg["smtp_password"])
@@ -136,12 +139,14 @@ class EmailNotifier(NotifierBase):
 
             if cfg.get("smtp_use_tls", True):
                 context = ssl.create_default_context()
+                validate_outbound_host(cfg["smtp_host"], int(cfg.get("smtp_port") or 587))
                 with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
                     server.starttls(context=context)
                     if cfg.get("smtp_user") and cfg.get("smtp_password"):
                         server.login(cfg["smtp_user"], cfg["smtp_password"])
                     server.sendmail(cfg["from_addr"], cfg["to_addrs"], msg.as_string())
             else:
+                validate_outbound_host(cfg["smtp_host"], int(cfg.get("smtp_port") or 587))
                 with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
                     if cfg.get("smtp_user") and cfg.get("smtp_password"):
                         server.login(cfg["smtp_user"], cfg["smtp_password"])
