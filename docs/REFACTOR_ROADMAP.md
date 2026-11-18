@@ -67,8 +67,8 @@
 | # | 批次 | 改造点 | 等级 | 状态 |
 |---|------|--------|------|------|
 | 1 | P0 | 清理已入库的登录态与运行日志 | 严重 | 已完成 |
-| 2 | P0 | 封堵 SSRF 与系统 Key 外泄 | 严重 | 未开始 |
-| 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 未开始 |
+| 2 | P0 | 封堵 SSRF 与系统 Key 外泄 | 严重 | 已完成 |
+| 3 | P0 | 生产启动强校验（fail-fast / fail-closed） | 严重 | 已完成 |
 | 4 | P0 | 修复授权链 4 处失效 + 调度器越权 | 严重 | 进行中 |
 | 5 | P1 | 修复 22 处失效导入与 `ANALYST_*` 缺失 | 高 | 进行中 |
 | 6 | P1 | 修复前端构建链（静态导出与 middleware 冲突） | 高 | 进行中 |
@@ -131,13 +131,24 @@
 
 **改造动作**
 
-- [ ] 抽出统一出站 URL 校验：仅 https、域名白名单、解析后拒绝私网/环回/链路本地/169.254.0.0/16、禁重定向、防 DNS rebinding
-- [ ] `/api/llm/test` 禁止回退使用系统默认 Key，测试必须显式提供自有 Key
-- [ ] webhook / SMTP 主机同样走白名单校验
-- [ ] `smtp_password` 复用 `crypto_utils` 加密，读取时脱敏
-- [ ] 统一错误文案，不回显上游响应与异常
+- [x] 抽出统一出站 URL 校验：仅 https、可选域名白名单、解析后拒绝私网/环回/链路本地/169.254.0.0/16、禁重定向；DNS rebinding 采用每次请求前实时解析的缓解方案
+- [x] `/api/llm/test` 禁止回退使用系统默认 Key，测试必须显式提供自有 Key
+- [x] webhook / SMTP 主机在保存、测试、发送三处同样走校验
+- [x] `smtp_password` 复用 `crypto_utils` 加密，读取时解密、响应中移除
+- [x] 统一错误文案，不回显上游响应与异常
 
 **验收**：对 `base_url=http://127.0.0.1:9`、`http://169.254.169.254`、外部域名分别返回明确拒绝；单元测试覆盖白名单内外与 DNS 解析结果。
+
+**2026-11-18 执行记录（已完成）**
+
+- 新增 `backend/core/outbound_guard.py`：统一 `validate_outbound_url()` / `validate_outbound_host()`，仅 https、拒绝 URL 内嵌凭据与 IP 字面量、实时 DNS 解析后拒绝所有受限网段、可选 `OUTBOUND_HOST_ALLOWLIST`（支持 `*.example.com`）、解析失败 fail-closed；所有 `requests.post` 均设 `allow_redirects=False`。
+- `/api/llm/test` 只接受请求体显式提供或用户自有的 Key；系统默认 Key 不再进入对外测试请求，且错误响应不再回显 `resp.text` 与 `str(e)`。
+- `get_effective_config()` 在使用系统 Key 时强制搭配系统默认 `base_url`，忽略用户自定义 `base_url`（**评审时新发现的外带路径，原清单未列**）；`/api/llm/configs` 的 `api_key_masked` 只反映用户自有 Key，系统 Key 的任何片段都不下发浏览器。
+- 推送侧：`save_push_config` / `test_push_channel` 与 `channel_wecom/feishu/email` 的发送函数都加校验；`db_push.py` 对 `smtp_password` 加密落库、读取解密（兼容存量明文，密文不二次加密）。
+- `crypto_utils._get_fernet()` 改为从 `settings.JWT_SECRET` 取密钥，修掉 dev 自动生成密钥时加密静默降级为明文的问题（此项是 #3 fail-closed 的前置）。
+- 新增 `tests/test_outbound_guard.py` 16 个用例：覆盖 http / 私网 DNS / IP 字面量 / 内嵌凭据 / 白名单 / DNS 失败 / SMTP 端口 / 系统 Key 拒绝 / 私网目标不发请求 / 系统 Key 绑定 base_url；全部 mock DNS，不联网。
+- 实测：`python -m pytest -q --basetemp=<独立目录>` **45 passed**；`python -m compileall -q backend tests` 退出 0。
+- **残留风险（已登记到 #8 部署层）**：DNS rebinding 的 TOCTOU 窗口无法仅靠应用层校验彻底消除，需出站代理或把连接固定到已校验 IP；自建/本地 LLM（私网地址）目前会被拒绝，如需支持须在部署层提供受信代理。
 
 ---
 
@@ -155,12 +166,23 @@
 
 **改造动作**
 
-- [ ] `ENV=prod` 时 `ALLOWED_ORIGINS` 为空直接 `raise RuntimeError`；校验每个 origin 为 https 且不含通配/路径
-- [ ] 弱值/短密钥/空值/算法白名单统一放进 `_validate_jwt_secret()`，prod 一律 raise；删除 `__main__` 软警告
-- [ ] 加密与权限检查改为 fail-closed；`crypto_utils` 从 `settings` 取密钥
-- [ ] prod 关闭 `docs_url/redoc_url/openapi_url`；`/metrics` 加鉴权或只绑内网；`/health` 只返回 ok/fail
+- [x] `ENV=prod` 时 `ALLOWED_ORIGINS` 为空直接 `raise RuntimeError`；校验每个 origin 为 https 且不含通配/路径/查询/内嵌凭据
+- [x] 弱值/短密钥/空值/算法白名单统一放进 `_validate_jwt_secret()`，prod 一律 raise；删除 `__main__` 软警告
+- [x] 加密与权限检查改为 fail-closed；`crypto_utils` 从 `settings` 取密钥
+- [x] prod 关闭 `docs_url/redoc_url/openapi_url`；`/metrics` 加 `X-Metrics-Token` 鉴权；`/health` 只返回 ok/failed
 
 **验收**：构造空 `ALLOWED_ORIGINS`、默认 JWT_SECRET、缺失加密密钥三种启动场景，prod 下均拒绝启动；正常配置可启动。
+
+**2026-11-18 执行记录（已完成）**
+
+- `core/config.py` 校验在**模块导入时**执行（`uvicorn` 以导入 `app` 方式启动同样触发）：`_validate_jwt_secret()` 增加弱值黑名单、prod 长度下限 32、`JWT_ALGORITHM` 白名单（HS256/384/512）；dev 自动生成的临时密钥回写 `os.environ["JWT_SECRET"]`，供 reload 子进程与加密模块复用。
+- 新增 `parse_allowed_origins()` 与 `validate_production_settings()`：prod 缺 `ALLOWED_ORIGINS` / 非法源 / 缺 `METRICS_TOKEN` 一律 raise；`gateway/main.py` 不再回退 CORS `*`。
+- prod 关闭 docs / redoc / openapi；`/metrics` 要求 `X-Metrics-Token`（`hmac.compare_digest`），否则 403；`/health` 移除 `scheduler_msg` / `database_msg` / `qdrant_msg`，只返回 ok/failed。
+- fail-closed：`encrypt_api_key()` 在 prod 缺密钥时抛异常而非明文落库；`decrypt_api_key()` 失败返回空值而非把密文当明文；`model_config_db._check_user_system_access()` 数据库异常时返回 `False`。
+- 新增 `tests/test_production_failfast.py` 17 个用例（假配置隔离，不改全局 settings、不启服务）。
+- 真实进程实跑 6 个场景：缺 JWT_SECRET / 缺 ALLOWED_ORIGINS / 缺 METRICS_TOKEN / http 或带路径的非法源 → 均 `RuntimeError`；prod 完整配置与 dev 默认 → `IMPORT OK`。
+- `.env.example` 新增 `ENV`、`ALLOWED_ORIGINS`、`JWT_SECRET`、`JWT_ALGORITHM`、`METRICS_TOKEN`、`DB_ENCRYPTION_KEY` 占位符；均为空值，不含真实凭据。
+- **部署侧待办（归 #8）**：生产 `.env` 必须补齐上述新变量（否则按设计拒绝启动）；Prometheus 抓取 `/metrics` 需配置 `X-Metrics-Token` 请求头；`docs/API_CONTRACT.md` 已同步。
 
 ---
 
@@ -340,7 +362,8 @@
 - 删除 `eslint.ignoreDuringBuilds` 后，静态导出构建自身也会执行 lint。
 - 实测：`npm run type-check` 退出 0；`npm run lint` 0 error / 25 warning；`STATIC_EXPORT=true npm run build` 退出 0；`python -m compileall -q backend tests` 退出 0；`git diff --check` 无空白错误。
 - **未验证**：本机未能完成干净环境的 `python -m pytest -q`（PyPI 拉取缓慢、依赖未装齐），门禁在 GitHub Actions 的首次运行结果需在首次 `main` 合并时观察。
-- **仍未完成**：`react-hooks/*` 仍有 2 个存量例外、25 个 warning；`功能清单与验证.md` 的关键路径尚未固化为自动化用例；#9 保持「进行中」。
+- **2026-11-18 追加（最小测试依赖集）**：静态递归分析 gateway 导入链（76 个内部文件 / 15 个第三方模块）后新增 `requirements-test.txt`；`deploy.yml` 的门禁安装步骤改用它，避开 `hdbscan` / `umap-learn` 等需 gcc 编译的生产聚类依赖，防止首次 `main` 合并因编译失败或超时误伤部署。本机改用国内镜像装齐最小集后 `python -m pytest -q` 已实跑 **45 passed**（首次因沙箱临时目录 `EEXIST` 报错，换独立 `--basetemp` 后全绿）。
+- **仍未完成**：CI 门禁在 GitHub Actions 的首次运行仍未观察（workflow 只在 push `main` 触发）；`react-hooks/*` 仍有 2 个存量例外、25 个 warning；`功能清单与验证.md` 的关键路径尚未固化为自动化用例；#9 保持「进行中」。
 
 **现状证据**
 
@@ -493,7 +516,7 @@
 
 | 批次 | 完成日期 | 验收结果 | 备注 |
 |------|----------|----------|------|
-| P0 止血 | — | — | — |
+| P0 止血 | 2026-11-18（部分） | #1 / #2 / #3 代码层验收通过；#4 业务层完成但部署期邀请码入口待接入 | `pytest` 45 passed、6 个 prod 启动场景实跑、compileall / type-check / lint / 静态导出构建全绿；#4 保持「进行中」，批次未结案 |
 | P1 恢复可运行 | — | — | — |
 | P2 防回归 | — | — | — |
 | P3 提质 | — | — | — |
@@ -502,8 +525,8 @@
 
 ## 7. 已知局限
 
-- 本轮结论来自**静态分析**。本机未安装项目依赖，后端未启动、前端未构建、无任何测试被执行。
-- #6 的「构建失败」是基于 Next.js 静态导出规则与代码配置的推断，需实跑 `STATIC_EXPORT=true npm run build` 确认或推翻。
-- #5 的断链是文件级实证（目标模块确实不存在），但完整影响面需在运行环境逐一复现。
+- 初始结论来自静态分析（2026-11-10）。2026-11-18 已补齐实证：本机装齐测试依赖并实跑 `pytest`（45 passed）、`compileall`、`type-check` / `lint` / `STATIC_EXPORT=true npm run build`；**后端仍未真实启动**，未调用任何 LLM / 爬虫 / 第三方，#5 的完整影响面需在运行环境逐一复现。
+- #6 的构建问题已由实跑确认并修复；静态导出仍禁用 middleware，`out/admin/*.html` 直接产出，生产路由鉴权归 #7/#8。
+- #9 的 CI 门禁已在 `deploy.yml` 落地，但 workflow 仅在 push `main` 时触发，首次 Actions 实跑结果尚未观察。
 - 凭据泄露的**历史范围**无法从浅克隆判断，本地无 git 历史；远端历史需单独审计。
 - 行号以 2026-11-10 的 `main@b51571f` 为准，改动后需同步更新。
