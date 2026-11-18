@@ -34,6 +34,8 @@ python-dotenv>=1.0.0
 
 # 调度器
 APScheduler>=3.10.0
+# agent_planner 的 cron 表达式校验（延迟导入，缺失时降级为弱校验）
+croniter>=2.0.0
 
 # 重试工具
 tenacity>=8.2.0

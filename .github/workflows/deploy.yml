@@ -24,6 +24,28 @@ jobs:
       - name: Install dependencies
         run: cd frontend/web && npm ci
 
+      # ======== 质量门禁：任一步失败即阻止后续部署 ========
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Backend tests
+        run: python -m pytest -q
+
+      - name: Lint frontend
+        run: cd frontend/web && npm run lint
+
+      - name: Type-check frontend
+        run: cd frontend/web && npm run type-check
+
       - name: Build frontend (static export)
         run: cd frontend/web && STATIC_EXPORT=true npm run build
 
