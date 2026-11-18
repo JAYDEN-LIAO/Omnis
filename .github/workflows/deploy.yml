@@ -31,11 +31,13 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: |
-            requirements.txt
+            requirements-test.txt
             requirements-dev.txt
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+      # 只装测试链路依赖：生产依赖里的 hdbscan / umap-learn 需本地编译，
+      # 与 pytest 无关却会让门禁因编译失败或超时误伤部署。
+      - name: Install Python dependencies (test-only)
+        run: pip install -r requirements-test.txt
 
       - name: Backend tests
         run: python -m pytest -q
